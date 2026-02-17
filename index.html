@@ -91,7 +91,7 @@
                     setLoading(true);
                     console.log('🔄 Processing OAuth tokens manually...');
                     
-                    // Extract user info from the JWT token directly (since it's in the URL)
+                    // Extract user info from the JWT token directly
                     const tokenParts = accessToken.split('.');
                     if (tokenParts.length !== 3) {
                         throw new Error('Invalid access token format');
@@ -103,38 +103,34 @@
                     
                     console.log('📧 Extracted from token - Email:', userEmail, 'Name:', userName);
                     
-                    // Check if user exists in our database
-                    console.log('🔍 Checking if user is registered in database...');
-                    const { data: dbUser, error: dbError } = await supabase
-                        .from('app_users')
-                        .select('*')
-                        .eq('email', userEmail)
-                        .eq('is_active', true)
-                        .single();
-                    
-                    console.log('Database query result:', { dbUser, dbError });
-                    
-                    if (dbError) {
-                        console.error('❌ Database error occurred:');
-                        console.error('Error message:', dbError.message);
-                        console.error('Error code:', dbError.code);
-                        console.error('Full error JSON:', JSON.stringify(dbError, null, 2));
-                        
-                        if (dbError.code === 'PGRST116') {
-                            // User not registered
-                            console.log('User not found in database:', userEmail);
-                            setAuthError(`Access Denied: Your account (${userEmail}) is not registered in this system. Please contact your administrator to request access.`);
-                        } else {
-                            setAuthError(`Database error: ${dbError.message || 'Unknown database error'}. Please try again later.`);
+                    // Hardcoded authorized users (temporary solution until database is fixed)
+                    const authorizedUsers = [
+                        {
+                            email: 'ziad.ahmed@nesmapartners.com',
+                            full_name: 'Ziad Ahmed',
+                            role: 'Admin'
+                        },
+                        {
+                            email: 'admin@repodirectory.com',
+                            full_name: 'System Administrator',
+                            role: 'Admin'
                         }
-                        
+                        // Add more users as needed
+                    ];
+                    
+                    console.log('🔍 Checking against authorized users list...');
+                    const authorizedUser = authorizedUsers.find(u => u.email.toLowerCase() === userEmail.toLowerCase());
+                    
+                    if (!authorizedUser) {
+                        console.log('❌ User not authorized:', userEmail);
+                        setAuthError(`Access Denied: Your account (${userEmail}) is not registered in this system. Please contact your administrator to request access.`);
                         window.history.replaceState({}, document.title, window.location.pathname);
                         setLoading(false);
                         return;
                     }
                     
                     // User found and valid
-                    console.log('✅ User authorized:', dbUser.email, 'Role:', dbUser.role);
+                    console.log('✅ User authorized:', authorizedUser.email, 'Role:', authorizedUser.role);
                     
                     // Create auth user object
                     const authUser = {
@@ -146,11 +142,22 @@
                         }
                     };
                     
+                    // Create database user object
+                    const dbUser = {
+                        id: payload.sub,
+                        email: authorizedUser.email,
+                        full_name: authorizedUser.full_name,
+                        role: authorizedUser.role,
+                        auth_provider: 'google',
+                        is_active: true,
+                        created_at: new Date().toISOString()
+                    };
+                    
                     setUser(authUser);
                     setCurrentUser(dbUser);
                     setAuthError(null);
                     
-                    console.log('🎉 Login successful!');
+                    console.log('🎉 Login successful! (Using hardcoded user list)');
                     
                     // Clean URL
                     window.history.replaceState({}, document.title, window.location.pathname);
