@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Procurement Reports Repository - Debug</title>
-    <link rel="icon" href="data:,">
+    <title>Procurement Reports Repository</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%234F46E5'><path d='M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z'/></svg>">
     
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
@@ -19,9 +19,15 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
 
-        // Replace with your actual Supabase credentials
+        // Replace these with your actual Supabase credentials
         const supabaseUrl = 'https://nrgusitisxvocfqqbsvg.supabase.co';
         const supabaseKey = 'sb_publishable_2FMu-Nwrf12sBL9xuqPmSg_tXRW_nHq';
+        
+        // Validate configuration
+        if (supabaseUrl === 'YOUR_SUPABASE_URL' || supabaseKey === 'YOUR_SUPABASE_ANON_KEY') {
+            console.error('❌ CONFIGURATION ERROR: Please replace YOUR_SUPABASE_URL and YOUR_SUPABASE_ANON_KEY with your actual Supabase credentials!');
+        }
+
         const supabase = supabase.createClient(supabaseUrl, supabaseKey);
 
         function App() {
@@ -29,58 +35,47 @@
             const [currentUser, setCurrentUser] = useState(null);
             const [loading, setLoading] = useState(true);
             const [authError, setAuthError] = useState(null);
-            const [debugInfo, setDebugInfo] = useState({});
+            const [logs, setLogs] = useState([]);
+
+            const addLog = (message, type = 'info') => {
+                const timestamp = new Date().toLocaleTimeString();
+                const logEntry = `[${timestamp}] ${message}`;
+                console.log(logEntry);
+                setLogs(prev => [...prev.slice(-9), { message: logEntry, type }]);
+            };
 
             useEffect(() => {
-                // Collect debug information
-                const debug = {
-                    currentUrl: window.location.href,
-                    origin: window.location.origin,
-                    hostname: window.location.hostname,
-                    protocol: window.location.protocol,
-                    hash: window.location.hash,
-                    search: window.location.search,
-                    isNetlify: window.location.hostname.includes('netlify'),
-                    userAgent: navigator.userAgent.substring(0, 100) + '...'
-                };
-                setDebugInfo(debug);
+                addLog('🚀 App initialized');
+                addLog(`📍 Running on: ${window.location.origin}`);
                 
-                console.log('=== DEBUG INFO ===');
-                console.log('Current URL:', debug.currentUrl);
-                console.log('Origin:', debug.origin);
-                console.log('Is Netlify:', debug.isNetlify);
-                console.log('Supabase URL configured:', supabaseUrl);
-                console.log('==================');
-                
+                // Check if we have the OAuth callback
+                if (window.location.hash && window.location.hash.includes('access_token')) {
+                    addLog('🔄 OAuth callback detected in URL');
+                } else if (window.location.search && window.location.search.includes('code=')) {
+                    addLog('🔄 OAuth code detected in URL');
+                } else {
+                    addLog('ℹ️ No OAuth callback detected');
+                }
+
                 initializeAuth();
             }, []);
 
             const initializeAuth = async () => {
                 try {
-                    // Check for OAuth callback parameters
-                    const hashParams = new URLSearchParams(window.location.hash.substring(1));
-                    const searchParams = new URLSearchParams(window.location.search);
-                    
-                    console.log('Hash params:', Object.fromEntries(hashParams));
-                    console.log('Search params:', Object.fromEntries(searchParams));
+                    addLog('🔑 Initializing authentication...');
 
-                    // Check active session
+                    // Check current session
                     const { data: { session }, error } = await supabase.auth.getSession();
-                    console.log('Session check result:', {
-                        hasSession: !!session,
-                        userEmail: session?.user?.email,
-                        error: error?.message
-                    });
                     
                     if (error) {
-                        console.error('Session error:', error);
+                        addLog(`❌ Session error: ${error.message}`, 'error');
                         setAuthError(`Session error: ${error.message}`);
                         setLoading(false);
                         return;
                     }
                     
                     if (session?.user) {
-                        console.log('✅ User authenticated via Google:', session.user.email);
+                        addLog(`✅ Found existing session for: ${session.user.email}`);
                         setUser(session.user);
                         await fetchCurrentUser(session.user);
                     } else {
@@ -89,41 +84,52 @@
                         if (manualUser) {
                             try {
                                 const userData = JSON.parse(manualUser);
-                                console.log('✅ Manual user found:', userData.email);
+                                addLog(`✅ Found manual user: ${userData.email}`);
                                 setCurrentUser(userData);
                             } catch (error) {
-                                console.error('❌ Error parsing manual user:', error);
+                                addLog(`❌ Error parsing manual user: ${error.message}`, 'error');
                                 localStorage.removeItem('manual_user');
                             }
+                        } else {
+                            addLog('ℹ️ No existing authentication found');
                         }
-                        console.log('ℹ️ No authenticated user found');
                         setLoading(false);
                     }
 
-                    // Listen for auth state changes
+                    // Set up auth state listener
                     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-                        console.log('🔄 Auth state change:', event, session?.user?.email || 'no user');
+                        addLog(`🔄 Auth event: ${event} ${session?.user?.email || ''}`);
                         
-                        if (event === 'SIGNED_IN') {
-                            setUser(session?.user ?? null);
-                            if (session?.user) {
-                                await fetchCurrentUser(session.user);
-                            }
-                            // Clean URL after OAuth success
-                            if (window.location.hash && window.location.hash.includes('access_token')) {
-                                console.log('🧹 Cleaning OAuth parameters from URL');
-                                window.history.replaceState({}, document.title, window.location.pathname);
-                            }
-                        } else if (event === 'SIGNED_OUT') {
-                            setUser(null);
-                            setCurrentUser(null);
-                            localStorage.removeItem('manual_user');
-                            setLoading(false);
+                        switch (event) {
+                            case 'SIGNED_IN':
+                                setUser(session?.user ?? null);
+                                if (session?.user) {
+                                    await fetchCurrentUser(session.user);
+                                }
+                                // Clean URL
+                                if (window.location.hash || window.location.search.includes('code=')) {
+                                    window.history.replaceState({}, document.title, window.location.pathname);
+                                }
+                                break;
+                            case 'SIGNED_OUT':
+                                addLog('👋 User signed out');
+                                setUser(null);
+                                setCurrentUser(null);
+                                localStorage.removeItem('manual_user');
+                                setLoading(false);
+                                break;
+                            case 'TOKEN_REFRESHED':
+                                addLog('🔄 Token refreshed');
+                                break;
+                            default:
+                                addLog(`🔄 Auth event: ${event}`);
                         }
                     });
 
+                    return () => subscription?.unsubscribe();
+
                 } catch (error) {
-                    console.error('❌ Auth initialization error:', error);
+                    addLog(`❌ Auth initialization failed: ${error.message}`, 'error');
                     setAuthError(`Authentication initialization failed: ${error.message}`);
                     setLoading(false);
                 }
@@ -131,7 +137,7 @@
 
             const fetchCurrentUser = async (authUser) => {
                 try {
-                    console.log('👤 Fetching user profile for:', authUser.email);
+                    addLog(`👤 Fetching user profile for: ${authUser.email}`);
                     
                     const { data, error } = await supabase
                         .from('app_users')
@@ -141,21 +147,21 @@
                         .single();
 
                     if (error) {
-                        console.error('❌ User profile error:', error);
                         if (error.code === 'PGRST116') {
-                            console.log('⏳ New user - waiting for profile creation...');
+                            addLog('⏳ User profile not found - might be new user, waiting...', 'warning');
                             setTimeout(() => fetchCurrentUser(authUser), 3000);
                             return;
                         }
-                        setAuthError(`User profile not found: ${error.message}. Please contact admin.`);
+                        addLog(`❌ User profile error: ${error.message}`, 'error');
+                        setAuthError(`User profile not found: ${error.message}. Please contact administrator.`);
                     } else {
-                        console.log('✅ User profile loaded:', data.full_name, `(${data.role})`);
+                        addLog(`✅ User profile loaded: ${data.full_name} (${data.role})`);
                         setCurrentUser(data);
                         setAuthError(null);
                     }
                 } catch (error) {
-                    console.error('❌ Profile fetch error:', error);
-                    setAuthError(`Error loading profile: ${error.message}`);
+                    addLog(`❌ Profile fetch error: ${error.message}`, 'error');
+                    setAuthError(`Error loading user profile: ${error.message}`);
                 } finally {
                     setLoading(false);
                 }
@@ -164,14 +170,8 @@
             const signInWithGoogle = async () => {
                 try {
                     setAuthError(null);
-                    console.log('🔑 Starting Google OAuth...');
-                    console.log('📍 Redirect URL will be:', window.location.origin);
-                    
-                    // Double-check we're not on localhost
-                    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-                        setAuthError('❌ You are running on localhost. Please deploy to Netlify first!');
-                        return;
-                    }
+                    addLog('🔑 Initiating Google OAuth...');
+                    addLog(`📍 Redirect URL: ${window.location.origin}`);
                     
                     const { data, error } = await supabase.auth.signInWithOAuth({
                         provider: 'google',
@@ -185,41 +185,49 @@
                     });
                     
                     if (error) {
-                        console.error('❌ Google OAuth error:', error);
+                        addLog(`❌ Google OAuth error: ${error.message}`, 'error');
                         setAuthError(`Google sign in failed: ${error.message}`);
                         return;
                     }
                     
-                    console.log('✅ Google OAuth initiated successfully');
-                    console.log('🔄 Redirecting to Google...');
+                    addLog('🔄 Google OAuth initiated - redirecting...');
                     
                 } catch (error) {
-                    console.error('❌ OAuth setup error:', error);
+                    addLog(`❌ OAuth setup error: ${error.message}`, 'error');
                     setAuthError(`OAuth setup error: ${error.message}`);
                 }
             };
 
             const signOut = async () => {
                 try {
-                    console.log('👋 Signing out...');
+                    addLog('👋 Signing out...');
                     const { error } = await supabase.auth.signOut();
                     if (error) throw error;
                     localStorage.removeItem('manual_user');
-                    console.log('✅ Signed out successfully');
+                    addLog('✅ Signed out successfully');
                 } catch (error) {
-                    console.error('❌ Sign out error:', error);
+                    addLog(`❌ Sign out error: ${error.message}`, 'error');
                 }
             };
 
             if (loading) {
                 return (
                     <div className="min-h-screen flex items-center justify-center">
-                        <div className="text-center max-w-md">
+                        <div className="text-center max-w-2xl">
                             <i className="fas fa-spinner fa-spin text-4xl text-blue-500 mb-4"></i>
-                            <p className="text-gray-600 mb-4">Loading authentication...</p>
-                            <div className="text-xs text-gray-500 space-y-1">
-                                <p>URL: {debugInfo.currentUrl}</p>
-                                <p>Environment: {debugInfo.isNetlify ? '✅ Netlify' : '❌ Not Netlify'}</p>
+                            <p className="text-gray-600 mb-6">Loading authentication...</p>
+                            
+                            {/* Live Logs */}
+                            <div className="bg-gray-900 text-green-400 p-4 rounded-lg text-left text-sm font-mono max-h-48 overflow-y-auto">
+                                {logs.map((log, index) => (
+                                    <div key={index} className={`mb-1 ${
+                                        log.type === 'error' ? 'text-red-400' : 
+                                        log.type === 'warning' ? 'text-yellow-400' : 
+                                        'text-green-400'
+                                    }`}>
+                                        {log.message}
+                                    </div>
+                                ))}
                             </div>
                         </div>
                     </div>
@@ -232,7 +240,7 @@
                         onGoogleSignIn={signInWithGoogle} 
                         authError={authError}
                         onClearError={() => setAuthError(null)}
-                        debugInfo={debugInfo}
+                        logs={logs}
                     />
                 );
             }
@@ -240,11 +248,11 @@
             return <Dashboard user={currentUser} onSignOut={signOut} />;
         }
 
-        function LoginScreen({ onGoogleSignIn, authError, onClearError, debugInfo }) {
+        function LoginScreen({ onGoogleSignIn, authError, onClearError, logs }) {
             const [showManualLogin, setShowManualLogin] = useState(false);
             const [loginForm, setLoginForm] = useState({ email: '', password: '' });
             const [loading, setLoading] = useState(false);
-            const [showDebugInfo, setShowDebugInfo] = useState(false);
+            const [showLogs, setShowLogs] = useState(false);
 
             const handleManualLogin = async (e) => {
                 e.preventDefault();
@@ -274,8 +282,8 @@
             };
 
             return (
-                <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-                    <div className="max-w-md w-full mx-4">
+                <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+                    <div className="max-w-md w-full">
                         <div className="bg-white rounded-lg shadow-lg p-8">
                             <div className="text-center mb-8">
                                 <i className="fas fa-file-alt text-5xl text-blue-600 mb-4"></i>
@@ -283,18 +291,11 @@
                                 <p className="text-gray-600">Repository Access</p>
                             </div>
 
-                            {/* Environment Status */}
-                            <div className={`mb-4 p-3 rounded-lg text-sm ${
-                                debugInfo.isNetlify ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-yellow-50 text-yellow-700 border border-yellow-200'
-                            }`}>
+                            {/* Status */}
+                            <div className="mb-4 p-3 bg-green-50 text-green-700 rounded-lg text-sm border border-green-200">
                                 <div className="flex items-center">
-                                    <i className={`fas ${debugInfo.isNetlify ? 'fa-check-circle' : 'fa-exclamation-triangle'} mr-2`}></i>
-                                    <span>
-                                        {debugInfo.isNetlify ? '✅ Running on Netlify' : '⚠️ Not running on Netlify'}
-                                    </span>
-                                </div>
-                                <div className="text-xs mt-1">
-                                    {debugInfo.hostname}
+                                    <i className="fas fa-check-circle mr-2"></i>
+                                    <span>✅ Running on Netlify: repodirectory.netlify.app</span>
                                 </div>
                             </div>
 
@@ -306,6 +307,12 @@
                                             {authError}
                                         </div>
                                     </div>
+                                    <button
+                                        onClick={onClearError}
+                                        className="text-xs text-red-600 hover:text-red-800 mt-2"
+                                    >
+                                        Dismiss
+                                    </button>
                                 </div>
                             )}
 
@@ -375,21 +382,26 @@
                                 </form>
                             )}
 
+                            {/* Debug Logs */}
                             <div className="mt-6 pt-4 border-t border-gray-200">
                                 <button
-                                    onClick={() => setShowDebugInfo(!showDebugInfo)}
+                                    onClick={() => setShowLogs(!showLogs)}
                                     className="text-xs text-gray-500 hover:text-gray-700"
                                 >
-                                    {showDebugInfo ? 'Hide' : 'Show'} Debug Info
+                                    {showLogs ? 'Hide' : 'Show'} Debug Logs
                                 </button>
                                 
-                                {showDebugInfo && (
-                                    <div className="mt-2 p-3 bg-gray-50 rounded text-xs font-mono space-y-1">
-                                        <div><strong>URL:</strong> {debugInfo.currentUrl}</div>
-                                        <div><strong>Origin:</strong> {debugInfo.origin}</div>
-                                        <div><strong>Protocol:</strong> {debugInfo.protocol}</div>
-                                        <div><strong>Is Netlify:</strong> {debugInfo.isNetlify ? 'Yes' : 'No'}</div>
-                                        <div><strong>Hash:</strong> {debugInfo.hash || 'none'}</div>
+                                {showLogs && (
+                                    <div className="mt-2 p-3 bg-gray-900 text-green-400 rounded text-xs font-mono max-h-32 overflow-y-auto">
+                                        {logs.map((log, index) => (
+                                            <div key={index} className={`mb-1 ${
+                                                log.type === 'error' ? 'text-red-400' : 
+                                                log.type === 'warning' ? 'text-yellow-400' : 
+                                                'text-green-400'
+                                            }`}>
+                                                {log.message}
+                                            </div>
+                                        ))}
                                     </div>
                                 )}
                             </div>
@@ -406,10 +418,12 @@
                         <i className="fas fa-check-circle text-6xl text-green-500 mb-4"></i>
                         <h1 className="text-2xl font-bold text-gray-900 mb-2">Welcome!</h1>
                         <p className="text-gray-600 mb-2">{user.full_name}</p>
-                        <p className="text-sm text-gray-500 mb-6">Role: {user.role}</p>
+                        <p className="text-sm text-gray-500 mb-6">
+                            Role: {user.role} • Auth: {user.auth_provider}
+                        </p>
                         <button
                             onClick={onSignOut}
-                            className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg"
+                            className="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded-lg"
                         >
                             Sign Out
                         </button>
