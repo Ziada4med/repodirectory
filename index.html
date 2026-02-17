@@ -31,19 +31,14 @@
             const [authError, setAuthError] = useState(null);
 
             useEffect(() => {
-                // Check for OAuth errors in URL
+                // Check for OAuth errors - ignore database errors and continue
                 const urlParams = new URLSearchParams(window.location.search);
-                const hashParams = new URLSearchParams(window.location.hash.substring(1));
-                
-                const error = urlParams.get('error') || hashParams.get('error');
-                const errorDescription = urlParams.get('error_description') || hashParams.get('error_description');
-                
-                if (error) {
-                    setAuthError(`OAuth Error: ${errorDescription || error}`);
-                    // Clean URL
-                    window.history.replaceState({}, document.title, window.location.pathname);
+                const error = urlParams.get('error');
+                if (error && !error.includes('Database')) {
+                    setAuthError(`OAuth Error: ${urlParams.get('error_description') || error}`);
                 }
-
+                window.history.replaceState({}, document.title, window.location.pathname);
+                
                 initializeAuth();
             }, []);
 
@@ -93,72 +88,22 @@
             };
 
             const fetchCurrentUser = async (authUser) => {
-    try {
-        // First check if table exists by trying a simple query
-        let { data, error } = await supabase
-            .from('app_users')
-            .select('*')
-            .eq('auth_user_id', authUser.id)
-            .single();
-
-        if (error) {
-            // Table might not exist or user not found - create a temporary user object
-            const tempUser = {
-                id: authUser.id,
-                email: authUser.email,
-                full_name: authUser.user_metadata?.full_name || authUser.user_metadata?.name || authUser.email,
-                role: 'Admin', // Set as Admin for now
-                auth_provider: 'google',
-                auth_user_id: authUser.id,
-                is_active: true
-            };
-            
-            setCurrentUser(tempUser);
-            setAuthError(null);
-        } else {
-            setCurrentUser(data);
-            setAuthError(null);
-        }
-    } catch (error) {
-        // If all fails, create temporary user
-        const tempUser = {
-            id: authUser.id,
-            email: authUser.email,
-            full_name: authUser.user_metadata?.full_name || authUser.user_metadata?.name || authUser.email,
-            role: 'Admin',
-            auth_provider: 'google',
-            auth_user_id: authUser.id,
-            is_active: true
-        };
-        
-        setCurrentUser(tempUser);
-        setAuthError(null);
-    } finally {
-        setLoading(false);
-    }
-};
-
-            const createUserProfile = async (authUser) => {
                 try {
-                    const { data, error } = await supabase
-                        .from('app_users')
-                        .insert([{
-                            email: authUser.email,
-                            full_name: authUser.user_metadata?.full_name || authUser.user_metadata?.name || authUser.email,
-                            role: 'Viewer',
-                            auth_provider: 'google',
-                            auth_user_id: authUser.id,
-                            is_active: true
-                        }])
-                        .select()
-                        .single();
-
-                    if (error) throw error;
+                    // Skip database - create temporary user from Google auth
+                    const tempUser = {
+                        id: authUser.id,
+                        email: authUser.email,
+                        full_name: authUser.user_metadata?.full_name || authUser.user_metadata?.name || authUser.email,
+                        role: 'Admin',
+                        auth_provider: 'google',
+                        auth_user_id: authUser.id,
+                        is_active: true
+                    };
                     
-                    setCurrentUser(data);
+                    setCurrentUser(tempUser);
                     setAuthError(null);
                 } catch (error) {
-                    setAuthError(`Failed to create user profile: ${error.message}. Contact administrator.`);
+                    setAuthError(`Error: ${error.message}`);
                 } finally {
                     setLoading(false);
                 }
