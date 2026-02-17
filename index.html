@@ -20,7 +20,7 @@
         const { useState, useEffect } = React;
 
         const supabaseUrl = 'https://nrgusitisxvocfqqbsvg.supabase.co';
-        const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5yZ3VzaXRpc3h2b2NmcXFic3ZnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAyODU3MTcsImV4cCI6MjA4NTg2MTcxN30.Ped9Cf8wCsighV5cmFETWdF_7ruktTj1CeJfo-0q8mw';
+        const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5yZ3VzaXRpc3h2b2NmcXFic3ZnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAyODU3MTcsImV4cCI6MjA4NTg2MTcxN30.Ped9Cf8wCsighV5cmFlETWdF_7ruktTj1CeJfo-0q8mw';
         
         // Validate API key format
         if (!supabaseKey.startsWith('eyJ')) {
@@ -704,8 +704,18 @@
                         }]);
 
                     if (error) {
-                        console.error('Database error:', error);
-                        alert(`Report "${formData.name}" noted!\n\nNote: Could not save to database (${error.message}), but your request has been recorded.`);
+                        console.error('❌ INSERT ERROR:', error);
+                        console.error('Error message:', error.message);
+                        console.error('Error code:', error.code);
+                        console.error('Error details:', error.details);
+                        console.error('Error hint:', error.hint);
+                        
+                        // Check if it's an RLS policy issue
+                        if (error.code === '42501' || error.message?.includes('policy')) {
+                            alert(`Database Permission Error: ${error.message}\n\nThis is likely an RLS (Row Level Security) policy issue. Please check your Supabase table permissions.`);
+                        } else {
+                            alert(`Database Error: ${error.message}\n\nError Code: ${error.code}`);
+                        }
                     } else {
                         console.log('✅ Report added successfully');
                         alert(`Report "${formData.name}" added successfully!`);
