@@ -31,9 +31,15 @@
             const [authError, setAuthError] = useState(null);
 
             useEffect(() => {
-                // Completely ignore OAuth error parameters
-                window.history.replaceState({}, document.title, window.location.pathname);
-                initializeAuth();
+                // Check for OAuth callback first
+                console.log('Current URL:', window.location.href);
+                console.log('Hash:', window.location.hash);
+                console.log('Search:', window.location.search);
+                
+                // Don't clear URL immediately - let Supabase process the OAuth callback first
+                setTimeout(() => {
+                    initializeAuth();
+                }, 100);
             }, []);
 
             const initializeAuth = async () => {
@@ -68,7 +74,10 @@
                     setLoading(false);
 
                     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+                        console.log('Auth state change:', event, session?.user?.email);
+                        
                         if (event === 'SIGNED_IN' && session?.user) {
+                            console.log('User signed in successfully:', session.user.email);
                             setUser(session.user);
                             const tempUser = {
                                 id: session.user.id,
@@ -81,7 +90,13 @@
                             };
                             setCurrentUser(tempUser);
                             setAuthError(null);
+                            
+                            // Clear URL after successful login
+                            setTimeout(() => {
+                                window.history.replaceState({}, document.title, window.location.pathname);
+                            }, 1000);
                         } else if (event === 'SIGNED_OUT') {
+                            console.log('User signed out');
                             setUser(null);
                             setCurrentUser(null);
                             localStorage.removeItem('manual_user');
