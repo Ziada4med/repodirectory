@@ -22,7 +22,32 @@
         const supabaseUrl = 'https://nrgusitisxvocfqqbsvg.supabase.co';
         const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5yZ3VzaXRpc3h2b2NmcXFic3ZnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAyODU3MTcsImV4cCI6MjA4NTg2MTcxN30.Ped9Cf8wCsighV5cmFlETWdF_7ruktTj1CeJfo-0q8mw';
         
+        // Validate API key format
+        if (!supabaseKey.startsWith('eyJ')) {
+            console.error('❌ Invalid Supabase API key format');
+        } else {
+            console.log('✅ Supabase API key format looks correct');
+        }
+        
         const supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
+        
+        // Test Supabase connection
+        const testSupabaseConnection = async () => {
+            try {
+                console.log('🔍 Testing Supabase connection...');
+                const { data, error } = await supabase.auth.getSession();
+                if (error) {
+                    console.error('❌ Supabase connection failed:', error);
+                    return false;
+                } else {
+                    console.log('✅ Supabase connection successful');
+                    return true;
+                }
+            } catch (err) {
+                console.error('❌ Supabase connection error:', err);
+                return false;
+            }
+        };
 
         function App() {
             const [user, setUser] = useState(null);
@@ -108,6 +133,14 @@
 
             const initializeAuth = async () => {
                 try {
+                    // Test Supabase connection first
+                    const connectionOk = await testSupabaseConnection();
+                    if (!connectionOk) {
+                        setAuthError('Supabase connection failed. Please check your API key.');
+                        setLoading(false);
+                        return;
+                    }
+
                     console.log('Getting session...');
                     const { data: { session }, error } = await supabase.auth.getSession();
                     console.log('Session result:', session?.user?.email, error?.message);
@@ -280,6 +313,23 @@
                                 <i className="fas fa-file-alt text-5xl text-blue-600 mb-4"></i>
                                 <h1 className="text-2xl font-bold text-gray-900">Procurement Reports</h1>
                                 <p className="text-gray-600">Repository Access</p>
+                            </div>
+
+                            <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                                <div className="flex items-start">
+                                    <i className="fas fa-exclamation-triangle text-yellow-600 mr-2 mt-0.5"></i>
+                                    <div className="text-sm text-yellow-700">
+                                        <div className="font-medium mb-2">Supabase API Key Issue</div>
+                                        <div className="mb-2">Your Supabase API key may have expired or changed.</div>
+                                        <div className="text-xs">
+                                            <strong>To fix:</strong><br/>
+                                            1. Go to your Supabase Dashboard<br/>
+                                            2. Settings → API<br/>
+                                            3. Copy the "anon/public" key<br/>
+                                            4. Replace the key in your HTML file
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
 
                             {authError && (
