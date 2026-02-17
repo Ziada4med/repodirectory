@@ -29,10 +29,21 @@
             const [currentUser, setCurrentUser] = useState(null);
             const [loading, setLoading] = useState(true);
             const [authError, setAuthError] = useState(null);
-            const [showAddForm, setShowAddForm] = useState(false);
-            const [showUserManagement, setShowUserManagement] = useState(false);
 
             useEffect(() => {
+                // Check for OAuth errors in URL
+                const urlParams = new URLSearchParams(window.location.search);
+                const hashParams = new URLSearchParams(window.location.hash.substring(1));
+                
+                const error = urlParams.get('error') || hashParams.get('error');
+                const errorDescription = urlParams.get('error_description') || hashParams.get('error_description');
+                
+                if (error) {
+                    setAuthError(`OAuth Error: ${errorDescription || error}`);
+                    // Clean URL
+                    window.history.replaceState({}, document.title, window.location.pathname);
+                }
+
                 initializeAuth();
             }, []);
 
@@ -67,9 +78,6 @@
                             setUser(session.user);
                             setAuthError(null);
                             await fetchCurrentUser(session.user);
-                            if (window.location.hash || window.location.search.includes('code=')) {
-                                window.history.replaceState({}, document.title, window.location.pathname);
-                            }
                         } else if (event === 'SIGNED_OUT') {
                             setUser(null);
                             setCurrentUser(null);
@@ -99,7 +107,7 @@
                             await createUserProfile(authUser);
                             return;
                         }
-                        setAuthError(`User profile not found in database. Error: ${error.message}. Please contact your administrator.`);
+                        setAuthError(`User profile not found in database. Error: ${error.message}`);
                     } else {
                         setCurrentUser(data);
                         setAuthError(null);
@@ -117,8 +125,8 @@
                         .from('app_users')
                         .insert([{
                             email: authUser.email,
-                            full_name: authUser.user_metadata?.full_name || authUser.email,
-                            role: 'Viewer', // Default role
+                            full_name: authUser.user_metadata?.full_name || authUser.user_metadata?.name || authUser.email,
+                            role: 'Viewer',
                             auth_provider: 'google',
                             auth_user_id: authUser.id,
                             is_active: true
@@ -131,7 +139,7 @@
                     setCurrentUser(data);
                     setAuthError(null);
                 } catch (error) {
-                    setAuthError(`Failed to create user profile: ${error.message}`);
+                    setAuthError(`Failed to create user profile: ${error.message}. Contact administrator.`);
                 } finally {
                     setLoading(false);
                 }
@@ -142,12 +150,18 @@
                     setAuthError(null);
 
                     const { data, error } = await supabase.auth.signInWithOAuth({
-                        provider: 'google'
+                        provider: 'google',
+                        options: {
+                            redirectTo: 'https://repodirectory.netlify.app/',
+                            queryParams: {
+                                access_type: 'offline',
+                                prompt: 'consent',
+                            }
+                        }
                     });
                     
                     if (error) {
                         setAuthError(`Google OAuth failed: ${error.message}`);
-                        return;
                     }
                     
                 } catch (error) {
@@ -236,7 +250,13 @@
                                     <div className="flex">
                                         <i className="fas fa-exclamation-circle text-red-400 mr-2 mt-0.5"></i>
                                         <div className="text-sm text-red-700 flex-1">
-                                            {authError}
+                                            <div className="font-medium mb-1">Authentication Error:</div>
+                                            <div>{authError}</div>
+                                            {authError.includes('Database error') && (
+                                                <div className="mt-2 text-xs">
+                                                    This usually means the app_users table or database trigger needs to be configured.
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                 </div>
