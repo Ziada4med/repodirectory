@@ -48,11 +48,16 @@
                     console.log('Creating user in app_users table:', authUser.email);
                     
                     // First try to find existing user
-                    const { data: existingUser } = await supabase
+                    const { data: existingUser, error: selectError } = await supabase
                         .from('app_users')
                         .select('*')
                         .eq('email', authUser.email)
                         .single();
+                    
+                    if (selectError && selectError.code !== 'PGRST116') {
+                        console.error('Error checking existing user:', selectError);
+                        throw selectError;
+                    }
                     
                     if (existingUser) {
                         console.log('User already exists in database:', existingUser.email);
@@ -60,12 +65,21 @@
                     }
                     
                     // User doesn't exist, create new one
+                    console.log('Creating new user with data:', {
+                        email: authUser.email,
+                        full_name: authUser.user_metadata?.full_name || authUser.user_metadata?.name || authUser.email,
+                        role: 'Viewer',
+                        auth_provider: 'google',
+                        auth_user_id: authUser.id,
+                        is_active: true
+                    });
+                    
                     const { data, error } = await supabase
                         .from('app_users')
                         .insert([{
                             email: authUser.email,
                             full_name: authUser.user_metadata?.full_name || authUser.user_metadata?.name || authUser.email,
-                            role: 'Viewer', // Default to Viewer, not Admin
+                            role: 'Viewer',
                             auth_provider: 'google',
                             auth_user_id: authUser.id,
                             is_active: true
@@ -74,14 +88,20 @@
                         .single();
 
                     if (error) {
-                        console.error('Database insert error:', error);
+                        console.error('Database insert error details:', {
+                            message: error.message,
+                            code: error.code,
+                            details: error.details,
+                            hint: error.hint,
+                            error: error
+                        });
                         throw error;
                     }
                     
                     console.log('User created successfully in database:', data);
                     return data;
                 } catch (error) {
-                    console.error('Failed to create user in database:', error);
+                    console.error('Failed to create user in database - full error:', error);
                     throw error;
                 }
             };
