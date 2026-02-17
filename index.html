@@ -132,32 +132,62 @@
                     // User found and valid
                     console.log('✅ User authorized:', authorizedUser.email, 'Role:', authorizedUser.role);
                     
-                    // Create auth user object
-                    const authUser = {
-                        id: payload.sub,
-                        email: userEmail,
-                        user_metadata: {
-                            full_name: userName,
-                            name: userName
+                    // Look up the actual database user to get the correct ID
+                    console.log('🔍 Looking up database user...');
+                    try {
+                        const { data: dbUserData, error: dbError } = await supabase
+                            .from('app_users')
+                            .select('*')
+                            .eq('email', userEmail)
+                            .eq('is_active', true)
+                            .single();
+                        
+                        if (dbError) {
+                            console.error('❌ Database user lookup failed:', dbError);
+                            setAuthError(`Database Error: Could not verify your account. Please contact administrator.`);
+                            return;
                         }
-                    };
-                    
-                    // Create database user object
-                    const dbUser = {
-                        id: payload.sub,
-                        email: authorizedUser.email,
-                        full_name: authorizedUser.full_name,
-                        role: authorizedUser.role,
-                        auth_provider: 'google',
-                        is_active: true,
-                        created_at: new Date().toISOString()
-                    };
-                    
-                    setUser(authUser);
-                    setCurrentUser(dbUser);
-                    setAuthError(null);
-                    
-                    console.log('🎉 Login successful! (Using hardcoded user list)');
+                        
+                        if (!dbUserData) {
+                            console.error('❌ User not found in database:', userEmail);
+                            setAuthError(`Account Error: Your account exists in the system but not in the database. Please contact administrator.`);
+                            return;
+                        }
+                        
+                        console.log('✅ Database user found:', dbUserData.email, 'Role:', dbUserData.role, 'ID:', dbUserData.id);
+                        
+                        // Create auth user object (for session management)
+                        const authUser = {
+                            id: payload.sub,
+                            email: userEmail,
+                            user_metadata: {
+                                full_name: userName,
+                                name: userName
+                            }
+                        };
+                        
+                        // Use the actual database user (with correct ID)
+                        const dbUser = {
+                            id: dbUserData.id,  // ✅ Use database ID: f4bbb6db-64a7-48c1-9b15-5674975f3880
+                            email: dbUserData.email,
+                            full_name: dbUserData.full_name,
+                            role: dbUserData.role,
+                            auth_provider: dbUserData.auth_provider || 'google',
+                            is_active: dbUserData.is_active,
+                            created_at: dbUserData.created_at
+                        };
+                        
+                        setUser(authUser);
+                        setCurrentUser(dbUser);  // ✅ This now has the correct database ID
+                        setAuthError(null);
+                        
+                        console.log('🎉 Login successful! Using database user ID:', dbUser.id);
+                        
+                    } catch (error) {
+                        console.error('❌ Error during database user lookup:', error);
+                        setAuthError(`System Error: ${error.message}. Please try again or contact administrator.`);
+                        return;
+                    }
                     
                     // Clean URL
                     window.history.replaceState({}, document.title, window.location.pathname);
