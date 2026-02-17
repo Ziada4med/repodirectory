@@ -19,42 +19,53 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
 
-        // Replace these with your actual Supabase credentials
+        // Your Supabase configuration
         const supabaseUrl = 'https://nrgusitisxvocfqqbsvg.supabase.co';
         const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5yZ3VzaXRpc3h2b2NmcXFic3ZnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAyODU3MTcsImV4cCI6MjA4NTg2MTcxN30.Ped9Cf8wCsighV5cmFETWdF_7ruktTj1CeJfo-0q8mw';
         
-        // Validate configuration
-        if (supabaseUrl === 'YOUR_SUPABASE_URL' || supabaseKey === 'YOUR_SUPABASE_ANON_KEY') {
-            console.error('❌ CONFIGURATION ERROR: Please replace YOUR_SUPABASE_URL and YOUR_SUPABASE_ANON_KEY with your actual Supabase credentials!');
-        }
-
-        const supabase = supabase.createClient(supabaseUrl, supabaseKey);
+        const supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
 
         function App() {
             const [user, setUser] = useState(null);
             const [currentUser, setCurrentUser] = useState(null);
             const [loading, setLoading] = useState(true);
             const [authError, setAuthError] = useState(null);
-            const [logs, setLogs] = useState([]);
+            const [debugInfo, setDebugInfo] = useState([]);
 
-            const addLog = (message, type = 'info') => {
+            const addDebugInfo = (message, type = 'info') => {
                 const timestamp = new Date().toLocaleTimeString();
-                const logEntry = `[${timestamp}] ${message}`;
-                console.log(logEntry);
-                setLogs(prev => [...prev.slice(-9), { message: logEntry, type }]);
+                const entry = `[${timestamp}] ${message}`;
+                console.log(entry);
+                setDebugInfo(prev => [...prev.slice(-20), { message: entry, type }]);
             };
 
             useEffect(() => {
-                addLog('🚀 App initialized');
-                addLog(`📍 Running on: ${window.location.origin}`);
+                addDebugInfo('🚀 App starting...');
+                addDebugInfo(`📍 Current URL: ${window.location.href}`);
+                addDebugInfo(`🌐 Origin: ${window.location.origin}`);
+                addDebugInfo(`🔧 Supabase URL: ${supabaseUrl}`);
                 
-                // Check if we have the OAuth callback
-                if (window.location.hash && window.location.hash.includes('access_token')) {
-                    addLog('🔄 OAuth callback detected in URL');
-                } else if (window.location.search && window.location.search.includes('code=')) {
-                    addLog('🔄 OAuth code detected in URL');
+                // Detailed URL analysis
+                const urlParams = {
+                    hash: window.location.hash,
+                    search: window.location.search,
+                    pathname: window.location.pathname,
+                    hostname: window.location.hostname
+                };
+                
+                addDebugInfo(`🔍 URL Analysis: ${JSON.stringify(urlParams)}`);
+                
+                // Check for OAuth callback indicators
+                if (urlParams.hash.includes('access_token')) {
+                    addDebugInfo('✅ OAuth access_token found in URL hash', 'success');
+                } else if (urlParams.hash.includes('error')) {
+                    addDebugInfo(`❌ OAuth error found in URL: ${urlParams.hash}`, 'error');
+                } else if (urlParams.search.includes('code=')) {
+                    addDebugInfo('✅ OAuth authorization code found in URL', 'success');
+                } else if (urlParams.search.includes('error=')) {
+                    addDebugInfo(`❌ OAuth error in search params: ${urlParams.search}`, 'error');
                 } else {
-                    addLog('ℹ️ No OAuth callback detected');
+                    addDebugInfo('ℹ️ No OAuth callback parameters detected');
                 }
 
                 initializeAuth();
@@ -62,82 +73,94 @@
 
             const initializeAuth = async () => {
                 try {
-                    addLog('🔑 Initializing authentication...');
+                    addDebugInfo('🔐 Testing Supabase connection...');
 
-                    // Check current session
+                    // Test basic connectivity
                     const { data: { session }, error } = await supabase.auth.getSession();
                     
                     if (error) {
-                        addLog(`❌ Session error: ${error.message}`, 'error');
-                        setAuthError(`Session error: ${error.message}`);
+                        addDebugInfo(`❌ Supabase auth error: ${error.message}`, 'error');
+                        setAuthError(`Authentication service error: ${error.message}`);
                         setLoading(false);
                         return;
                     }
                     
+                    addDebugInfo('✅ Supabase connection successful');
+                    
                     if (session?.user) {
-                        addLog(`✅ Found existing session for: ${session.user.email}`);
+                        addDebugInfo(`✅ Active session found: ${session.user.email}`);
+                        addDebugInfo(`📧 User ID: ${session.user.id}`);
+                        addDebugInfo(`🔑 Auth provider: ${session.user.app_metadata?.provider || 'unknown'}`);
+                        
                         setUser(session.user);
                         await fetchCurrentUser(session.user);
                     } else {
+                        addDebugInfo('ℹ️ No active session');
                         // Check for manual user
                         const manualUser = localStorage.getItem('manual_user');
                         if (manualUser) {
                             try {
                                 const userData = JSON.parse(manualUser);
-                                addLog(`✅ Found manual user: ${userData.email}`);
+                                addDebugInfo(`✅ Manual user from localStorage: ${userData.email}`);
                                 setCurrentUser(userData);
                             } catch (error) {
-                                addLog(`❌ Error parsing manual user: ${error.message}`, 'error');
+                                addDebugInfo(`❌ Invalid manual user data: ${error.message}`, 'error');
                                 localStorage.removeItem('manual_user');
                             }
-                        } else {
-                            addLog('ℹ️ No existing authentication found');
                         }
                         setLoading(false);
                     }
 
-                    // Set up auth state listener
+                    // Set up auth state change listener
                     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-                        addLog(`🔄 Auth event: ${event} ${session?.user?.email || ''}`);
+                        addDebugInfo(`🔄 Auth state change: ${event}`);
+                        
+                        if (session?.user) {
+                            addDebugInfo(`👤 User in session: ${session.user.email}`);
+                        }
                         
                         switch (event) {
                             case 'SIGNED_IN':
+                                addDebugInfo(`✅ User signed in: ${session?.user?.email}`);
                                 setUser(session?.user ?? null);
+                                setAuthError(null);
                                 if (session?.user) {
                                     await fetchCurrentUser(session.user);
                                 }
-                                // Clean URL
+                                // Clean URL after successful OAuth
                                 if (window.location.hash || window.location.search.includes('code=')) {
+                                    addDebugInfo('🧹 Cleaning OAuth parameters from URL');
                                     window.history.replaceState({}, document.title, window.location.pathname);
                                 }
                                 break;
+                                
                             case 'SIGNED_OUT':
-                                addLog('👋 User signed out');
+                                addDebugInfo('👋 User signed out');
                                 setUser(null);
                                 setCurrentUser(null);
                                 localStorage.removeItem('manual_user');
                                 setLoading(false);
                                 break;
+                                
                             case 'TOKEN_REFRESHED':
-                                addLog('🔄 Token refreshed');
+                                addDebugInfo('🔄 Auth token refreshed');
                                 break;
+                                
                             default:
-                                addLog(`🔄 Auth event: ${event}`);
+                                addDebugInfo(`🔄 Auth event: ${event}`);
                         }
                     });
 
-                    return () => subscription?.unsubscribe();
-
                 } catch (error) {
-                    addLog(`❌ Auth initialization failed: ${error.message}`, 'error');
-                    setAuthError(`Authentication initialization failed: ${error.message}`);
+                    addDebugInfo(`❌ Auth initialization failed: ${error.message}`, 'error');
+                    setAuthError(`Failed to initialize authentication: ${error.message}`);
                     setLoading(false);
                 }
             };
 
             const fetchCurrentUser = async (authUser) => {
                 try {
-                    addLog(`👤 Fetching user profile for: ${authUser.email}`);
+                    addDebugInfo(`👤 Looking up user profile for: ${authUser.email}`);
                     
                     const { data, error } = await supabase
                         .from('app_users')
@@ -147,20 +170,28 @@
                         .single();
 
                     if (error) {
+                        addDebugInfo(`❌ User profile query error: ${error.code} - ${error.message}`, 'error');
+                        
                         if (error.code === 'PGRST116') {
-                            addLog('⏳ User profile not found - might be new user, waiting...', 'warning');
+                            addDebugInfo('⏳ User profile not found - might be new user', 'warning');
+                            addDebugInfo('Waiting for user profile to be created by database trigger...');
+                            
+                            // Wait and retry
                             setTimeout(() => fetchCurrentUser(authUser), 3000);
                             return;
                         }
-                        addLog(`❌ User profile error: ${error.message}`, 'error');
-                        setAuthError(`User profile not found: ${error.message}. Please contact administrator.`);
+                        
+                        setAuthError(`User profile not found in database. Error: ${error.message}. Please contact your administrator.`);
                     } else {
-                        addLog(`✅ User profile loaded: ${data.full_name} (${data.role})`);
+                        addDebugInfo(`✅ User profile found: ${data.full_name} (${data.role})`);
+                        addDebugInfo(`📧 Profile email: ${data.email}`);
+                        addDebugInfo(`🔐 Auth provider: ${data.auth_provider}`);
+                        
                         setCurrentUser(data);
                         setAuthError(null);
                     }
                 } catch (error) {
-                    addLog(`❌ Profile fetch error: ${error.message}`, 'error');
+                    addDebugInfo(`❌ Profile fetch exception: ${error.message}`, 'error');
                     setAuthError(`Error loading user profile: ${error.message}`);
                 } finally {
                     setLoading(false);
@@ -170,13 +201,24 @@
             const signInWithGoogle = async () => {
                 try {
                     setAuthError(null);
-                    addLog('🔑 Initiating Google OAuth...');
-                    addLog(`📍 Redirect URL: ${window.location.origin}`);
+                    addDebugInfo('🔑 Initiating Google OAuth...');
                     
+                    const currentOrigin = window.location.origin;
+                    addDebugInfo(`📍 Current origin: ${currentOrigin}`);
+                    addDebugInfo(`🔄 OAuth redirect will be: ${currentOrigin}`);
+                    
+                    // Validate we're not on localhost
+                    if (currentOrigin.includes('localhost') || currentOrigin.includes('127.0.0.1')) {
+                        const error = 'Still running on localhost! Please use https://repodirectory.netlify.app';
+                        addDebugInfo(`❌ ${error}`, 'error');
+                        setAuthError(error);
+                        return;
+                    }
+
                     const { data, error } = await supabase.auth.signInWithOAuth({
                         provider: 'google',
                         options: {
-                            redirectTo: window.location.origin,
+                            redirectTo: currentOrigin,
                             queryParams: {
                                 access_type: 'offline',
                                 prompt: 'consent',
@@ -185,53 +227,34 @@
                     });
                     
                     if (error) {
-                        addLog(`❌ Google OAuth error: ${error.message}`, 'error');
-                        setAuthError(`Google sign in failed: ${error.message}`);
+                        addDebugInfo(`❌ OAuth request failed: ${error.message}`, 'error');
+                        setAuthError(`Google OAuth failed: ${error.message}`);
                         return;
                     }
                     
-                    addLog('🔄 Google OAuth initiated - redirecting...');
+                    addDebugInfo('✅ OAuth request sent - redirecting to Google...');
+                    addDebugInfo('🔄 If you see localhost error, check Google Cloud Console settings');
                     
                 } catch (error) {
-                    addLog(`❌ OAuth setup error: ${error.message}`, 'error');
+                    addDebugInfo(`❌ OAuth exception: ${error.message}`, 'error');
                     setAuthError(`OAuth setup error: ${error.message}`);
                 }
             };
 
             const signOut = async () => {
                 try {
-                    addLog('👋 Signing out...');
+                    addDebugInfo('👋 Initiating sign out...');
                     const { error } = await supabase.auth.signOut();
                     if (error) throw error;
                     localStorage.removeItem('manual_user');
-                    addLog('✅ Signed out successfully');
+                    addDebugInfo('✅ Sign out successful');
                 } catch (error) {
-                    addLog(`❌ Sign out error: ${error.message}`, 'error');
+                    addDebugInfo(`❌ Sign out error: ${error.message}`, 'error');
                 }
             };
 
             if (loading) {
-                return (
-                    <div className="min-h-screen flex items-center justify-center">
-                        <div className="text-center max-w-2xl">
-                            <i className="fas fa-spinner fa-spin text-4xl text-blue-500 mb-4"></i>
-                            <p className="text-gray-600 mb-6">Loading authentication...</p>
-                            
-                            {/* Live Logs */}
-                            <div className="bg-gray-900 text-green-400 p-4 rounded-lg text-left text-sm font-mono max-h-48 overflow-y-auto">
-                                {logs.map((log, index) => (
-                                    <div key={index} className={`mb-1 ${
-                                        log.type === 'error' ? 'text-red-400' : 
-                                        log.type === 'warning' ? 'text-yellow-400' : 
-                                        'text-green-400'
-                                    }`}>
-                                        {log.message}
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    </div>
-                );
+                return <LoadingScreen debugInfo={debugInfo} />;
             }
 
             if (!user && !currentUser) {
@@ -240,50 +263,58 @@
                         onGoogleSignIn={signInWithGoogle} 
                         authError={authError}
                         onClearError={() => setAuthError(null)}
-                        logs={logs}
+                        debugInfo={debugInfo}
                     />
                 );
             }
 
-            return <Dashboard user={currentUser} onSignOut={signOut} />;
+            return <Dashboard user={currentUser} onSignOut={signOut} debugInfo={debugInfo} />;
         }
 
-        function LoginScreen({ onGoogleSignIn, authError, onClearError, logs }) {
+        function LoadingScreen({ debugInfo }) {
+            const [showDebug, setShowDebug] = useState(false);
+
+            return (
+                <div className="min-h-screen flex items-center justify-center p-4">
+                    <div className="text-center max-w-3xl w-full">
+                        <i className="fas fa-spinner fa-spin text-4xl text-blue-500 mb-4"></i>
+                        <p className="text-gray-600 mb-6">Loading authentication system...</p>
+                        
+                        <button
+                            onClick={() => setShowDebug(!showDebug)}
+                            className="text-sm text-blue-600 hover:text-blue-800 mb-4"
+                        >
+                            {showDebug ? 'Hide' : 'Show'} Initialization Log
+                        </button>
+
+                        {showDebug && (
+                            <div className="bg-gray-900 text-left p-4 rounded-lg text-xs font-mono max-h-96 overflow-y-auto">
+                                {debugInfo.map((item, index) => (
+                                    <div key={index} className={`mb-1 ${
+                                        item.type === 'error' ? 'text-red-400' : 
+                                        item.type === 'warning' ? 'text-yellow-400' : 
+                                        item.type === 'success' ? 'text-green-400' :
+                                        'text-gray-300'
+                                    }`}>
+                                        {item.message}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        function LoginScreen({ onGoogleSignIn, authError, onClearError, debugInfo }) {
+            const [showDebug, setShowDebug] = useState(false);
             const [showManualLogin, setShowManualLogin] = useState(false);
-            const [loginForm, setLoginForm] = useState({ email: '', password: '' });
-            const [loading, setLoading] = useState(false);
-            const [showLogs, setShowLogs] = useState(false);
 
-            const handleManualLogin = async (e) => {
-                e.preventDefault();
-                setLoading(true);
-                onClearError();
-
-                try {
-                    const { data, error } = await supabase
-                        .from('app_users')
-                        .select('*')
-                        .eq('email', loginForm.email)
-                        .eq('auth_provider', 'manual')
-                        .eq('is_active', true)
-                        .single();
-
-                    if (error || !data || data.password_hash !== loginForm.password) {
-                        throw new Error('Invalid credentials');
-                    }
-
-                    localStorage.setItem('manual_user', JSON.stringify(data));
-                    window.location.reload();
-                } catch (error) {
-                    alert('Invalid credentials');
-                } finally {
-                    setLoading(false);
-                }
-            };
+            const isNetlify = window.location.hostname === 'repodirectory.netlify.app';
 
             return (
                 <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-                    <div className="max-w-md w-full">
+                    <div className="max-w-lg w-full">
                         <div className="bg-white rounded-lg shadow-lg p-8">
                             <div className="text-center mb-8">
                                 <i className="fas fa-file-alt text-5xl text-blue-600 mb-4"></i>
@@ -291,11 +322,19 @@
                                 <p className="text-gray-600">Repository Access</p>
                             </div>
 
-                            {/* Status */}
-                            <div className="mb-4 p-3 bg-green-50 text-green-700 rounded-lg text-sm border border-green-200">
-                                <div className="flex items-center">
-                                    <i className="fas fa-check-circle mr-2"></i>
-                                    <span>✅ Running on Netlify: repodirectory.netlify.app</span>
+                            {/* Environment Status */}
+                            <div className={`mb-6 p-4 rounded-lg border ${
+                                isNetlify ? 'bg-green-50 border-green-200' : 'bg-yellow-50 border-yellow-200'
+                            }`}>
+                                <div className="flex items-center mb-2">
+                                    <i className={`fas ${isNetlify ? 'fa-check-circle text-green-600' : 'fa-exclamation-triangle text-yellow-600'} mr-2`}></i>
+                                    <span className={`font-medium ${isNetlify ? 'text-green-800' : 'text-yellow-800'}`}>
+                                        {isNetlify ? 'Environment: Production (Netlify)' : 'Environment: Development'}
+                                    </span>
+                                </div>
+                                <div className="text-sm text-gray-600">
+                                    <div>URL: {window.location.href}</div>
+                                    <div>Domain: {window.location.hostname}</div>
                                 </div>
                             </div>
 
@@ -304,7 +343,8 @@
                                     <div className="flex">
                                         <i className="fas fa-exclamation-circle text-red-400 mr-2 mt-0.5"></i>
                                         <div className="text-sm text-red-700 flex-1">
-                                            {authError}
+                                            <div className="font-medium mb-1">Authentication Error:</div>
+                                            <div>{authError}</div>
                                         </div>
                                     </div>
                                     <button
@@ -320,8 +360,7 @@
                                 <div className="space-y-4">
                                     <button
                                         onClick={onGoogleSignIn}
-                                        disabled={loading}
-                                        className="w-full flex items-center justify-center gap-3 bg-white border border-gray-300 rounded-lg px-4 py-3 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
+                                        className="w-full flex items-center justify-center gap-3 bg-white border border-gray-300 rounded-lg px-4 py-3 text-gray-700 hover:bg-gray-50 transition-colors"
                                     >
                                         <svg className="w-5 h-5" viewBox="0 0 24 24">
                                             <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -344,62 +383,27 @@
                                     </button>
                                 </div>
                             ) : (
-                                <form onSubmit={handleManualLogin} className="space-y-4">
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                                        <input
-                                            type="email"
-                                            required
-                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                            value={loginForm.email}
-                                            onChange={(e) => setLoginForm({...loginForm, email: e.target.value})}
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-                                        <input
-                                            type="password"
-                                            required
-                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                            value={loginForm.password}
-                                            onChange={(e) => setLoginForm({...loginForm, password: e.target.value})}
-                                        />
-                                    </div>
-                                    <button
-                                        type="submit"
-                                        disabled={loading}
-                                        className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-3 rounded-lg disabled:opacity-50"
-                                    >
-                                        {loading ? 'Signing in...' : 'Sign In'}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowManualLogin(false)}
-                                        className="w-full text-gray-600 hover:text-gray-800"
-                                    >
-                                        Back to Google Sign In
-                                    </button>
-                                </form>
+                                <ManualLoginForm onBack={() => setShowManualLogin(false)} />
                             )}
 
-                            {/* Debug Logs */}
                             <div className="mt-6 pt-4 border-t border-gray-200">
                                 <button
-                                    onClick={() => setShowLogs(!showLogs)}
+                                    onClick={() => setShowDebug(!showDebug)}
                                     className="text-xs text-gray-500 hover:text-gray-700"
                                 >
-                                    {showLogs ? 'Hide' : 'Show'} Debug Logs
+                                    {showDebug ? 'Hide' : 'Show'} Technical Debug Log
                                 </button>
                                 
-                                {showLogs && (
-                                    <div className="mt-2 p-3 bg-gray-900 text-green-400 rounded text-xs font-mono max-h-32 overflow-y-auto">
-                                        {logs.map((log, index) => (
+                                {showDebug && (
+                                    <div className="mt-3 p-3 bg-gray-900 text-green-400 rounded text-xs font-mono max-h-64 overflow-y-auto">
+                                        {debugInfo.map((item, index) => (
                                             <div key={index} className={`mb-1 ${
-                                                log.type === 'error' ? 'text-red-400' : 
-                                                log.type === 'warning' ? 'text-yellow-400' : 
-                                                'text-green-400'
+                                                item.type === 'error' ? 'text-red-400' : 
+                                                item.type === 'warning' ? 'text-yellow-400' : 
+                                                item.type === 'success' ? 'text-green-400' :
+                                                'text-gray-300'
                                             }`}>
-                                                {log.message}
+                                                {item.message}
                                             </div>
                                         ))}
                                     </div>
@@ -411,22 +415,127 @@
             );
         }
 
-        function Dashboard({ user, onSignOut }) {
+        function ManualLoginForm({ onBack }) {
+            const [formData, setFormData] = useState({ email: '', password: '' });
+            const [loading, setLoading] = useState(false);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+
+                try {
+                    const { data, error } = await supabase
+                        .from('app_users')
+                        .select('*')
+                        .eq('email', formData.email)
+                        .eq('auth_provider', 'manual')
+                        .eq('is_active', true)
+                        .single();
+
+                    if (error || !data || data.password_hash !== formData.password) {
+                        throw new Error('Invalid credentials');
+                    }
+
+                    localStorage.setItem('manual_user', JSON.stringify(data));
+                    window.location.reload();
+                } catch (error) {
+                    alert('Invalid credentials');
+                } finally {
+                    setLoading(false);
+                }
+            };
+
             return (
-                <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-                    <div className="bg-white rounded-lg shadow-lg p-8 text-center max-w-md">
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                        <input
+                            type="email"
+                            required
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            value={formData.email}
+                            onChange={(e) => setFormData({...formData, email: e.target.value})}
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                        <input
+                            type="password"
+                            required
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            value={formData.password}
+                            onChange={(e) => setFormData({...formData, password: e.target.value})}
+                        />
+                    </div>
+                    <button
+                        type="submit"
+                        disabled={loading}
+                        className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-3 rounded-lg disabled:opacity-50"
+                    >
+                        {loading ? 'Signing in...' : 'Sign In'}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={onBack}
+                        className="w-full text-gray-600 hover:text-gray-800"
+                    >
+                        Back to Google Sign In
+                    </button>
+                </form>
+            );
+        }
+
+        function Dashboard({ user, onSignOut, debugInfo }) {
+            const [showDebug, setShowDebug] = useState(false);
+
+            return (
+                <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-lg shadow-lg p-8 text-center max-w-md w-full">
                         <i className="fas fa-check-circle text-6xl text-green-500 mb-4"></i>
                         <h1 className="text-2xl font-bold text-gray-900 mb-2">Welcome!</h1>
-                        <p className="text-gray-600 mb-2">{user.full_name}</p>
+                        <p className="text-lg text-gray-600 mb-2">{user.full_name}</p>
                         <p className="text-sm text-gray-500 mb-6">
-                            Role: {user.role} • Auth: {user.auth_provider}
+                            Role: {user.role} • Provider: {user.auth_provider}
                         </p>
+                        
+                        <div className="space-y-3 mb-6">
+                            <div className="text-sm text-green-600 bg-green-50 p-3 rounded">
+                                ✅ Authentication successful!
+                            </div>
+                            <div className="text-xs text-gray-500">
+                                Your procurement reports dashboard would be implemented here.
+                            </div>
+                        </div>
+
                         <button
                             onClick={onSignOut}
-                            className="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded-lg"
+                            className="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded-lg mb-4"
                         >
                             Sign Out
                         </button>
+
+                        <div className="pt-4 border-t">
+                            <button
+                                onClick={() => setShowDebug(!showDebug)}
+                                className="text-xs text-gray-500 hover:text-gray-700"
+                            >
+                                {showDebug ? 'Hide' : 'Show'} Session Debug
+                            </button>
+                            
+                            {showDebug && (
+                                <div className="mt-3 p-3 bg-gray-900 text-green-400 rounded text-xs font-mono max-h-32 overflow-y-auto text-left">
+                                    {debugInfo.slice(-10).map((item, index) => (
+                                        <div key={index} className={`mb-1 ${
+                                            item.type === 'error' ? 'text-red-400' : 
+                                            item.type === 'success' ? 'text-green-400' :
+                                            'text-gray-300'
+                                        }`}>
+                                            {item.message}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
             );
