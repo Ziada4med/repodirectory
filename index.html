@@ -112,6 +112,8 @@
                         .eq('is_active', true)
                         .single();
                     
+                    console.log('Database query result:', { dbUser, dbError });
+                    
                     if (dbError && dbError.code === 'PGRST116') {
                         // User not registered
                         console.log('❌ User not registered:', userEmail);
@@ -120,7 +122,13 @@
                         setLoading(false);
                         return;
                     } else if (dbError) {
-                        console.error('Database error:', dbError);
+                        console.error('Database error details:', {
+                            message: dbError.message,
+                            code: dbError.code,
+                            details: dbError.details,
+                            hint: dbError.hint,
+                            dbError: dbError
+                        });
                         setAuthError(`Database error: ${dbError.message}. Please try again later.`);
                         window.history.replaceState({}, document.title, window.location.pathname);
                         setLoading(false);
