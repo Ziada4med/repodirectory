@@ -930,72 +930,121 @@
             const [loading, setLoading] = useState(true);
             const [showAddUser, setShowAddUser] = useState(false);
 
-            // Hardcoded users list with report access control
-            const initialUsers = [
-                {
-                    id: '1',
-                    email: 'ziad.ahmed@nesmapartners.com',
-                    full_name: 'Ziad Ahmed',
-                    role: 'Admin',
-                    auth_provider: 'google',
-                    is_active: true,
-                    created_at: new Date().toISOString(),
-                    accessible_reports: ['all']
-                },
-                {
-                    id: '2',
-                    email: 'john.doe@company.com',
-                    full_name: 'John Doe',
-                    role: 'Viewer',
-                    auth_provider: 'google',
-                    is_active: true,
-                    created_at: new Date(Date.now() - 86400000).toISOString(),
-                    accessible_reports: ['mock-1', 'mock-2']
-                },
-                {
-                    id: '3',
-                    email: 'jane.smith@company.com',
-                    full_name: 'Jane Smith',
-                    role: 'Viewer',
-                    auth_provider: 'manual',
-                    is_active: false,
-                    created_at: new Date(Date.now() - 172800000).toISOString(),
-                    accessible_reports: ['mock-1']
-                }
-            ];
-
             useEffect(() => {
-                // Simulate loading
-                setTimeout(() => {
-                    setUsers(initialUsers);
-                    setLoading(false);
-                }, 500);
+                fetchUsers();
             }, []);
 
-            const updateUserRole = (userId, newRole) => {
-                setUsers(users.map(user => 
-                    user.id === userId 
-                        ? { ...user, role: newRole, accessible_reports: newRole === 'Admin' ? ['all'] : user.accessible_reports }
-                        : user
-                ));
-                const user = users.find(u => u.id === userId);
-                alert(`${user.full_name}'s role updated to ${newRole}`);
+            const fetchUsers = async () => {
+                try {
+                    console.log('🔍 Fetching users from database...');
+                    
+                    const { data, error } = await supabase
+                        .from('app_users')
+                        .select('*')
+                        .order('created_at', { ascending: false });
+
+                    if (error) {
+                        console.error('❌ USER FETCH ERROR:', error);
+                        console.error('Error message:', error.message);
+                        console.error('Error code:', error.code);
+                        alert(`Database Error: ${error.message}\n\nCould not load users.`);
+                        setUsers([]);
+                    } else {
+                        console.log('✅ Users fetched successfully:', data);
+                        setUsers(data || []);
+                    }
+                } catch (error) {
+                    console.error('💥 FETCH USERS FAILED:', error);
+                    alert(`System Error: ${error.message}`);
+                    setUsers([]);
+                } finally {
+                    setLoading(false);
+                }
             };
 
-            const toggleUserStatus = (userId) => {
-                setUsers(users.map(user => 
-                    user.id === userId ? { ...user, is_active: !user.is_active } : user
-                ));
-                const user = users.find(u => u.id === userId);
-                alert(`${user.full_name} ${user.is_active ? 'deactivated' : 'activated'}`);
+            const updateUserRole = async (userId, newRole) => {
+                try {
+                    console.log('🔄 Updating user role:', userId, 'to', newRole);
+                    
+                    const { error } = await supabase
+                        .from('app_users')
+                        .update({ 
+                            role: newRole,
+                            updated_at: new Date().toISOString()
+                        })
+                        .eq('id', userId);
+
+                    if (error) {
+                        console.error('❌ ROLE UPDATE ERROR:', error);
+                        alert(`Database Error: ${error.message}\n\nCould not update user role.`);
+                    } else {
+                        console.log('✅ User role updated successfully');
+                        const user = users.find(u => u.id === userId);
+                        alert(`${user.full_name}'s role updated to ${newRole}`);
+                        fetchUsers(); // Refresh the list
+                    }
+                } catch (error) {
+                    console.error('💥 UPDATE ROLE FAILED:', error);
+                    alert(`System Error: ${error.message}`);
+                }
             };
 
-            const availableReports = [
-                { id: 'mock-1', name: 'Monthly Procurement Summary' },
-                { id: 'mock-2', name: 'Vendor Performance Analysis' },
-                { id: 'mock-3', name: 'Cost Savings Report' },
-                { id: 'mock-4', name: 'Emergency Purchase Orders' }
-            ];
+            const toggleUserStatus = async (userId) => {
+                try {
+                    const user = users.find(u => u.id === userId);
+                    const newStatus = !user.is_active;
+                    
+                    console.log('🔄 Toggling user status:', userId, 'to', newStatus);
+                    
+                    const { error } = await supabase
+                        .from('app_users')
+                        .update({ 
+                            is_active: newStatus,
+                            updated_at: new Date().toISOString()
+                        })
+                        .eq('id', userId);
+
+                    if (error) {
+                        console.error('❌ STATUS TOGGLE ERROR:', error);
+                        alert(`Database Error: ${error.message}\n\nCould not update user status.`);
+                    } else {
+                        console.log('✅ User status updated successfully');
+                        alert(`${user.full_name} ${newStatus ? 'activated' : 'deactivated'}`);
+                        fetchUsers(); // Refresh the list
+                    }
+                } catch (error) {
+                    console.error('💥 TOGGLE STATUS FAILED:', error);
+                    alert(`System Error: ${error.message}`);
+                }
+            };
+
+            const deleteUser = async (userId) => {
+                const user = users.find(u => u.id === userId);
+                if (!confirm(`Are you sure you want to delete ${user.full_name}?\n\nThis action cannot be undone.`)) {
+                    return;
+                }
+
+                try {
+                    console.log('🔄 Deleting user:', userId);
+                    
+                    const { error } = await supabase
+                        .from('app_users')
+                        .delete()
+                        .eq('id', userId);
+
+                    if (error) {
+                        console.error('❌ DELETE USER ERROR:', error);
+                        alert(`Database Error: ${error.message}\n\nCould not delete user.`);
+                    } else {
+                        console.log('✅ User deleted successfully');
+                        alert(`${user.full_name} has been deleted`);
+                        fetchUsers(); // Refresh the list
+                    }
+                } catch (error) {
+                    console.error('💥 DELETE USER FAILED:', error);
+                    alert(`System Error: ${error.message}`);
+                }
+            };
 
             return (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -1026,14 +1075,9 @@
                                         <UserCard 
                                             key={user.id} 
                                             user={user} 
-                                            availableReports={availableReports}
                                             onUpdateRole={updateUserRole}
                                             onToggleStatus={toggleUserStatus}
-                                            onUpdateReports={(userId, reportIds) => {
-                                                setUsers(users.map(u => 
-                                                    u.id === userId ? { ...u, accessible_reports: reportIds } : u
-                                                ));
-                                            }}
+                                            onDeleteUser={deleteUser}
                                         />
                                     ))}
                                 </div>
@@ -1042,12 +1086,10 @@
 
                         {showAddUser && (
                             <AddUserModal 
-                                availableReports={availableReports}
                                 onClose={() => setShowAddUser(false)}
-                                onSuccess={(newUser) => {
-                                    setUsers([...users, { ...newUser, id: Date.now().toString() }]);
+                                onSuccess={() => {
                                     setShowAddUser(false);
-                                    alert(`User ${newUser.full_name} added successfully!`);
+                                    fetchUsers(); // Refresh the list after adding user
                                 }}
                             />
                         )}
@@ -1056,21 +1098,7 @@
             );
         }
 
-        function UserCard({ user, availableReports, onUpdateRole, onToggleStatus, onUpdateReports }) {
-            const [showReports, setShowReports] = useState(false);
-            const [selectedReports, setSelectedReports] = useState(user.accessible_reports || []);
-
-            const handleReportToggle = (reportId) => {
-                let newReports;
-                if (selectedReports.includes(reportId)) {
-                    newReports = selectedReports.filter(id => id !== reportId);
-                } else {
-                    newReports = [...selectedReports, reportId];
-                }
-                setSelectedReports(newReports);
-                onUpdateReports(user.id, newReports);
-            };
-
+        function UserCard({ user, onUpdateRole, onToggleStatus, onDeleteUser }) {
             return (
                 <div className="bg-gray-50 p-4 rounded-lg border">
                     <div className="flex justify-between items-start mb-3">
@@ -1079,6 +1107,9 @@
                             <p className="text-sm text-gray-600">{user.email}</p>
                             <p className="text-xs text-gray-500">
                                 {user.auth_provider} • Created {new Date(user.created_at).toLocaleDateString()}
+                                {user.updated_at && user.updated_at !== user.created_at && (
+                                    <span> • Updated {new Date(user.updated_at).toLocaleDateString()}</span>
+                                )}
                             </p>
                         </div>
                         <div className="flex items-center gap-3">
@@ -1100,87 +1131,82 @@
                             >
                                 {user.is_active ? 'Active' : 'Inactive'}
                             </button>
+                            <button
+                                onClick={() => onDeleteUser(user.id)}
+                                className="px-3 py-1 bg-red-100 text-red-800 hover:bg-red-200 rounded-full text-xs font-medium"
+                                title="Delete User"
+                            >
+                                <i className="fas fa-trash"></i>
+                            </button>
                         </div>
                     </div>
-
-                    {user.role !== 'Admin' && (
-                        <div className="mt-3">
-                            <button
-                                onClick={() => setShowReports(!showReports)}
-                                className="text-sm text-blue-600 hover:text-blue-800 font-medium"
-                            >
-                                <i className={`fas fa-chevron-${showReports ? 'up' : 'down'} mr-1`}></i>
-                                Report Access ({selectedReports.length} reports)
-                            </button>
-
-                            {showReports && (
-                                <div className="mt-3 p-3 bg-white rounded border">
-                                    <div className="text-sm font-medium text-gray-700 mb-2">Select accessible reports:</div>
-                                    <div className="space-y-2">
-                                        {availableReports.map(report => (
-                                            <label key={report.id} className="flex items-center text-sm">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={selectedReports.includes(report.id)}
-                                                    onChange={() => handleReportToggle(report.id)}
-                                                    className="mr-2 rounded text-blue-600 focus:ring-blue-500"
-                                                />
-                                                {report.name}
-                                            </label>
-                                        ))}
-                                    </div>
-                                    <div className="mt-2 text-xs text-gray-500">
-                                        Selected: {selectedReports.length} of {availableReports.length} reports
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    )}
 
                     {user.role === 'Admin' && (
                         <div className="mt-2 text-sm text-gray-600">
                             <i className="fas fa-crown text-yellow-500 mr-1"></i>
-                            Admin - Access to all reports
+                            Admin - Full access to all reports and user management
+                        </div>
+                    )}
+
+                    {user.role === 'Viewer' && (
+                        <div className="mt-2 text-sm text-gray-600">
+                            <i className="fas fa-eye text-blue-500 mr-1"></i>
+                            Viewer - Read-only access to reports
                         </div>
                     )}
                 </div>
             );
         }
 
-        function AddUserModal({ availableReports, onClose, onSuccess }) {
+        function AddUserModal({ onClose, onSuccess }) {
             const [formData, setFormData] = useState({
                 email: '',
                 full_name: '',
                 role: 'Viewer',
-                accessible_reports: []
+                auth_provider: 'manual'
             });
+            const [loading, setLoading] = useState(false);
 
-            const handleReportToggle = (reportId) => {
-                const newReports = formData.accessible_reports.includes(reportId)
-                    ? formData.accessible_reports.filter(id => id !== reportId)
-                    : [...formData.accessible_reports, reportId];
-                setFormData({ ...formData, accessible_reports: newReports });
-            };
-
-            const handleSubmit = (e) => {
+            const handleSubmit = async (e) => {
                 e.preventDefault();
-                
-                const newUser = {
-                    email: formData.email,
-                    full_name: formData.full_name,
-                    role: formData.role,
-                    auth_provider: 'manual',
-                    is_active: true,
-                    created_at: new Date().toISOString(),
-                    accessible_reports: formData.role === 'Admin' ? ['all'] : formData.accessible_reports
-                };
+                setLoading(true);
 
-                onSuccess(newUser);
+                try {
+                    console.log('🔄 Adding new user to database...');
+                    
+                    const { error } = await supabase
+                        .from('app_users')
+                        .insert([{
+                            email: formData.email.toLowerCase().trim(),
+                            full_name: formData.full_name.trim(),
+                            role: formData.role,
+                            auth_provider: formData.auth_provider,
+                            is_active: true
+                        }]);
+
+                    if (error) {
+                        console.error('❌ ADD USER ERROR:', error);
+                        if (error.code === '23505') {
+                            alert(`Error: A user with email "${formData.email}" already exists.`);
+                        } else {
+                            alert(`Database Error: ${error.message}\n\nCould not add user.`);
+                        }
+                    } else {
+                        console.log('✅ User added successfully');
+                        alert(`User "${formData.full_name}" added successfully!`);
+                        onSuccess();
+                    }
+                } catch (error) {
+                    console.error('💥 ADD USER FAILED:', error);
+                    alert(`System Error: ${error.message}`);
+                } finally {
+                    setLoading(false);
+                }
             };
 
             return (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                    <div className="bg-white rounded-lg p-6 w-full max-w-lg mx-4 max-h-[80vh] overflow-y-auto">
+                    <div className="bg-white rounded-lg p-6 w-full max-w-lg mx-4">
                         <div className="flex justify-between items-center mb-4">
                             <h3 className="text-lg font-semibold">Add New User</h3>
                             <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
@@ -1199,6 +1225,7 @@
                                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                                     value={formData.email}
                                     onChange={(e) => setFormData({...formData, email: e.target.value})}
+                                    placeholder="user@company.com"
                                 />
                             </div>
 
@@ -1212,6 +1239,7 @@
                                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                                     value={formData.full_name}
                                     onChange={(e) => setFormData({...formData, full_name: e.target.value})}
+                                    placeholder="John Doe"
                                 />
                             </div>
 
@@ -1224,19 +1252,56 @@
                                     value={formData.role}
                                     onChange={(e) => setFormData({...formData, role: e.target.value})}
                                 >
-                                    <option value="Viewer">Viewer</option>
-                                    <option value="Admin">Admin</option>
+                                    <option value="Viewer">Viewer - Read-only access</option>
+                                    <option value="Admin">Admin - Full access</option>
                                 </select>
                             </div>
 
-                            {formData.role !== 'Admin' && (
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                                        Report Access
-                                    </label>
-                                    <div className="border border-gray-300 rounded-lg p-3 max-h-40 overflow-y-auto">
-                                        {availableReports.map(report => (
-                                            <label key={report.id} className="flex items-center text-sm mb-2">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Authentication Provider *
+                                </label>
+                                <select
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                    value={formData.auth_provider}
+                                    onChange={(e) => setFormData({...formData, auth_provider: e.target.value})}
+                                >
+                                    <option value="manual">Manual - Added by admin</option>
+                                    <option value="google">Google - OAuth login</option>
+                                </select>
+                            </div>
+
+                            <div className="flex gap-3 pt-4">
+                                <button
+                                    type="button"
+                                    onClick={onClose}
+                                    className="flex-1 px-4 py-2 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={loading}
+                                    className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50"
+                                >
+                                    {loading ? (
+                                        <>
+                                            <i className="fas fa-spinner fa-spin mr-2"></i>
+                                            Adding...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <i className="fas fa-plus mr-2"></i>
+                                            Add User
+                                        </>
+                                    )}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            );
+        }
                                                 <input
                                                     type="checkbox"
                                                     checked={formData.accessible_reports.includes(report.id)}
