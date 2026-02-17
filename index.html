@@ -70,16 +70,35 @@
 
             const createUserInDatabase = async (authUser) => {
                 try {
+                    console.log('=== DEBUGGING DATABASE CONNECTION ===');
+                    console.log('Supabase URL:', supabaseUrl);
+                    console.log('API Key (first 20 chars):', supabaseKey.substring(0, 20) + '...');
+                    console.log('Auth User:', authUser);
+                    
                     console.log('Creating user in app_users table:', authUser.email);
                     
-                    // First try to find existing user
+                    // Test basic connection first
+                    console.log('Testing basic table access...');
+                    const { data: testData, error: testError } = await supabase
+                        .from('app_users')
+                        .select('count', { count: 'exact', head: true });
+                    
+                    console.log('Table access test result:', { testData, testError });
+                    
+                    if (testError) {
+                        console.error('Basic table access failed:', testError);
+                        throw new Error(`Table access failed: ${testError.message}`);
+                    }
+                    
+                    // Try to find existing user
+                    console.log('Checking for existing user...');
                     const { data: existingUser, error: selectError } = await supabase
                         .from('app_users')
                         .select('*')
                         .eq('email', authUser.email)
                         .single();
                     
-                    console.log('Select query result:', { existingUser, selectError });
+                    console.log('Existing user check:', { existingUser, selectError });
                     
                     if (selectError && selectError.code !== 'PGRST116') {
                         console.error('Error checking existing user - Details:', {
@@ -134,7 +153,11 @@
                     console.log('User created successfully in database:', data);
                     return data;
                 } catch (error) {
-                    console.error('Failed to create user in database - full error:', error);
+                    console.error('=== DATABASE ERROR DETAILS ===');
+                    console.error('Error object:', error);
+                    console.error('Error message:', error.message);
+                    console.error('Error name:', error.name);
+                    console.error('Error stack:', error.stack);
                     throw error;
                 }
             };
@@ -236,43 +259,69 @@
                 try {
                     setAuthError(null);
                     setLoading(true);
-                    console.log('Creating demo user for testing...');
+                    console.log('Creating demo user...');
                     
-                    // Create demo user for testing
-                    const demoAuthUser = {
-                        id: 'demo_' + Date.now(),
-                        email: 'demo@repodirectory.com',
-                        user_metadata: {
-                            full_name: 'Demo Admin User',
-                            name: 'Demo Admin User'
-                        }
+                    // Create simple demo user directly in database
+                    const demoEmail = 'demo@repodirectory.com';
+                    const demoUser = {
+                        email: demoEmail,
+                        full_name: 'Demo User',
+                        role: 'Admin',
+                        auth_provider: 'demo',
+                        is_active: true
                     };
                     
-                    // Try to create user in database
                     try {
-                        const dbUser = await createUserInDatabase(demoAuthUser);
-                        setCurrentUser(dbUser);
-                        setUser(demoAuthUser);
+                        // Try to insert user directly (will fail if already exists, which is fine)
+                        const { data: newUser, error: insertError } = await supabase
+                            .from('app_users')
+                            .insert([demoUser])
+                            .select()
+                            .single();
+                        
+                        if (insertError && insertError.code === '23505') {
+                            // User already exists, fetch existing user
+                            console.log('User already exists, fetching existing user...');
+                            const { data: existingUser, error: fetchError } = await supabase
+                                .from('app_users')
+                                .select('*')
+                                .eq('email', demoEmail)
+                                .single();
+                            
+                            if (fetchError) {
+                                console.error('Error fetching existing user:', fetchError);
+                                throw fetchError;
+                            }
+                            
+                            setCurrentUser(existingUser);
+                            console.log('Existing user loaded:', existingUser);
+                        } else if (insertError) {
+                            console.error('Insert error:', insertError);
+                            throw insertError;
+                        } else {
+                            setCurrentUser(newUser);
+                            console.log('New user created:', newUser);
+                        }
+                        
+                        setUser({ id: Date.now(), email: demoEmail });
                         setAuthError(null);
-                        console.log('Demo user created in database successfully');
-                    } catch (createError) {
-                        console.error('Database creation failed:', createError);
-                        // Create temporary user even if DB fails
+                        
+                    } catch (dbError) {
+                        console.error('Database operation failed:', dbError);
+                        
+                        // Create temp user as fallback
                         const tempUser = {
-                            id: demoAuthUser.id,
-                            email: demoAuthUser.email,
-                            full_name: 'Demo User',
-                            role: 'Viewer', // Default to Viewer
+                            id: Date.now(),
+                            email: demoEmail,
+                            full_name: 'Demo User (Temp)',
+                            role: 'Admin',
                             auth_provider: 'demo',
-                            auth_user_id: demoAuthUser.id,
                             is_active: true
                         };
-                        setCurrentUser(tempUser);
-                        setUser(demoAuthUser);
                         
-                        // Show the real error, not "Invalid API key"
-                        const errorMsg = createError.message || createError.toString();
-                        setAuthError(`Database error: ${errorMsg}. This is likely a permissions issue, not an API key problem.`);
+                        setCurrentUser(tempUser);
+                        setUser({ id: tempUser.id, email: tempUser.email });
+                        setAuthError(`Database error: ${dbError.message}. Using temporary user.`);
                     }
                     
                 } catch (error) {
