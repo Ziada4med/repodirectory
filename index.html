@@ -103,63 +103,46 @@
                     
                     console.log('📧 Extracted from token - Email:', userEmail, 'Name:', userName);
                     
-                    // Hardcoded authorized users (temporary solution until database is fixed)
-                    const authorizedUsers = [
-                        {
-                            email: 'ziad.ahmed@nesmapartners.com',
-                            full_name: 'Ziad Ahmed',
-                            role: 'Admin'
-                        },
-                        {
-                            email: 'ziadrehiem@gmail.com',
-                            full_name: 'Ziad Ahmed',
-                            role: 'Admin'
-                        },
-                        {
-                            email: 'admin@repodirectory.com',
-                            full_name: 'System Administrator',
-                            role: 'Admin'
-                        }
-                        // Add more users as needed
-                    ];
-                    
-                    console.log('🔍 Checking against authorized users list...');
-                    const authorizedUser = authorizedUsers.find(u => u.email.toLowerCase() === userEmail.toLowerCase());
-                    
-                    if (!authorizedUser) {
-                        console.log('❌ User not authorized:', userEmail);
-                        setAuthError(`Access Denied: Your account (${userEmail}) is not registered in this system. Please contact your administrator to request access.`);
-                        window.history.replaceState({}, document.title, window.location.pathname);
-                        setLoading(false);
-                        return;
-                    }
-                    
-                    // User found and valid
-                    console.log('✅ User authorized:', authorizedUser.email, 'Role:', authorizedUser.role);
-                    
-                    // Look up the actual database user to get the correct ID
-                    console.log('🔍 Looking up database user...');
+                    // Look up user directly in database (no hardcoded list bullshit)
+                    console.log('🔍 Looking up user in database...');
                     try {
                         const { data: dbUserData, error: dbError } = await supabase
                             .from('app_users')
                             .select('*')
-                            .eq('email', userEmail)
+                            .eq('email', userEmail.toLowerCase())
                             .eq('is_active', true)
                             .single();
                         
-                        if (dbError) {
-                            console.error('❌ Database user lookup failed:', dbError);
-                            setAuthError(`Database Error: Could not verify your account. Please contact administrator.`);
+                        if (dbError && dbError.code === 'PGRST116') {
+                            // User not found in database
+                            console.error('❌ User not found in database:', userEmail);
+                            setAuthError(`Access Denied: Your account (${userEmail}) is not registered in this system. Please contact your administrator to request access.`);
+                            window.history.replaceState({}, document.title, window.location.pathname);
+                            setLoading(false);
+                            return;
+                        } else if (dbError) {
+                            // Other database error
+                            console.error('❌ Database error during user lookup:', dbError);
+                            setAuthError(`Database Error: ${dbError.message}. Please try again later.`);
+                            setLoading(false);
                             return;
                         }
                         
                         if (!dbUserData) {
-                            console.error('❌ User not found in database:', userEmail);
-                            setAuthError(`Account Error: Your account exists in the system but not in the database. Please contact administrator.`);
+                            console.error('❌ User not found:', userEmail);
+                            setAuthError(`Access Denied: Your account is not registered in this system. Please contact administrator.`);
+                            setLoading(false);
                             return;
                         }
                         
-                        console.log('✅ Database user found:', dbUserData.email, 'Role:', dbUserData.role, 'ID:', dbUserData.id);
+                        if (!dbUserData.is_active) {
+                            console.error('❌ User account inactive:', userEmail);
+                            setAuthError(`Access Denied: Your account has been deactivated. Please contact administrator.`);
+                            setLoading(false);
+                            return;
+                        }
+                        
+                        console.log('✅ Database user found and active:', dbUserData.email, 'Role:', dbUserData.role, 'ID:', dbUserData.id);
                         
                         // Create auth user object (for session management)
                         const authUser = {
@@ -173,7 +156,7 @@
                         
                         // Use the actual database user (with correct ID)
                         const dbUser = {
-                            id: dbUserData.id,  // ✅ Use database ID: f4bbb6db-64a7-48c1-9b15-5674975f3880
+                            id: dbUserData.id,  // ✅ Use database ID
                             email: dbUserData.email,
                             full_name: dbUserData.full_name,
                             role: dbUserData.role,
