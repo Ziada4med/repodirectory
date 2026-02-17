@@ -59,103 +59,101 @@
                 console.log('App initializing...');
                 console.log('Current URL:', window.location.href);
                 
-                // Check if we're being redirected back from OAuth with an error
-                const urlParams = new URLSearchParams(window.location.search);
+                // Check if we have OAuth callback tokens in the URL hash
                 const hashParams = new URLSearchParams(window.location.hash.substring(1));
+                const accessToken = hashParams.get('access_token');
+                const refreshToken = hashParams.get('refresh_token');
                 
-                const error = urlParams.get('error') || hashParams.get('error');
-                const errorDescription = urlParams.get('error_description') || hashParams.get('error_description');
-                
-                if (error && error === 'server_error' && errorDescription && errorDescription.includes('Database error saving new user')) {
-                    console.log('Detected Supabase auto-user creation error, attempting to continue anyway...');
-                    
-                    // Try to extract access token from the URL anyway
-                    const accessToken = hashParams.get('access_token');
-                    const refreshToken = hashParams.get('refresh_token');
-                    
-                    if (accessToken) {
-                        console.log('Found access token despite error, processing manually...');
-                        processOAuthManually(accessToken, refreshToken);
-                        return;
-                    }
-                    
-                    setAuthError('Authentication failed due to database configuration. Please contact administrator.');
-                    window.history.replaceState({}, document.title, window.location.pathname);
+                if (accessToken) {
+                    console.log('✅ Found access token in URL, processing OAuth callback...');
+                    processOAuthManually(accessToken, refreshToken);
                     return;
                 }
                 
-                // Clear any other error parameters from URL
-                if (window.location.search.includes('error') || window.location.hash.includes('error')) {
-                    console.log('Clearing error parameters from URL...');
+                // Check for OAuth error
+                const urlParams = new URLSearchParams(window.location.search);
+                const error = urlParams.get('error') || hashParams.get('error');
+                
+                if (error) {
+                    console.log('OAuth error detected:', error);
+                    setAuthError(`Authentication failed: ${error}`);
                     window.history.replaceState({}, document.title, window.location.pathname);
+                    setLoading(false);
+                    return;
                 }
                 
+                // No OAuth callback, proceed with normal initialization
                 initializeAuth();
             }, []);
 
             const processOAuthManually = async (accessToken, refreshToken) => {
                 try {
-                    console.log('Processing OAuth tokens manually...');
+                    setLoading(true);
+                    console.log('🔄 Processing OAuth tokens manually...');
                     
-                    // Get user info from Google
-                    const response = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
-                        headers: {
-                            'Authorization': `Bearer ${accessToken}`
-                        }
-                    });
-                    
-                    if (!response.ok) {
-                        throw new Error('Failed to get user info from Google');
+                    // Extract user info from the JWT token directly (since it's in the URL)
+                    const tokenParts = accessToken.split('.');
+                    if (tokenParts.length !== 3) {
+                        throw new Error('Invalid access token format');
                     }
                     
-                    const googleUser = await response.json();
-                    console.log('Google user info:', googleUser.email);
+                    const payload = JSON.parse(atob(tokenParts[1]));
+                    const userEmail = payload.email;
+                    const userName = payload.user_metadata?.full_name || payload.user_metadata?.name || userEmail;
+                    
+                    console.log('📧 Extracted from token - Email:', userEmail, 'Name:', userName);
                     
                     // Check if user exists in our database
+                    console.log('🔍 Checking if user is registered in database...');
                     const { data: dbUser, error: dbError } = await supabase
                         .from('app_users')
                         .select('*')
-                        .eq('email', googleUser.email)
+                        .eq('email', userEmail)
                         .eq('is_active', true)
                         .single();
                     
                     if (dbError && dbError.code === 'PGRST116') {
                         // User not registered
-                        setAuthError(`Access Denied: Your account (${googleUser.email}) is not registered in this system. Please contact your administrator to request access.`);
+                        console.log('❌ User not registered:', userEmail);
+                        setAuthError(`Access Denied: Your account (${userEmail}) is not registered in this system. Please contact your administrator to request access.`);
                         window.history.replaceState({}, document.title, window.location.pathname);
+                        setLoading(false);
                         return;
                     } else if (dbError) {
                         console.error('Database error:', dbError);
                         setAuthError(`Database error: ${dbError.message}. Please try again later.`);
                         window.history.replaceState({}, document.title, window.location.pathname);
+                        setLoading(false);
                         return;
                     }
                     
                     // User found and valid
-                    console.log('User authorized:', dbUser.email, 'Role:', dbUser.role);
+                    console.log('✅ User authorized:', dbUser.email, 'Role:', dbUser.role);
                     
-                    // Create a mock auth user object
+                    // Create auth user object
                     const authUser = {
-                        id: googleUser.id,
-                        email: googleUser.email,
+                        id: payload.sub,
+                        email: userEmail,
                         user_metadata: {
-                            full_name: googleUser.name,
-                            name: googleUser.name
+                            full_name: userName,
+                            name: userName
                         }
                     };
                     
                     setUser(authUser);
                     setCurrentUser(dbUser);
                     setAuthError(null);
-                    setLoading(false);
+                    
+                    console.log('🎉 Login successful!');
                     
                     // Clean URL
                     window.history.replaceState({}, document.title, window.location.pathname);
                     
                 } catch (error) {
-                    console.error('Manual OAuth processing error:', error);
+                    console.error('❌ Manual OAuth processing error:', error);
                     setAuthError(`Authentication processing failed: ${error.message}`);
                     window.history.replaceState({}, document.title, window.location.pathname);
+                } finally {
                     setLoading(false);
                 }
             };
