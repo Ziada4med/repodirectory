@@ -351,35 +351,70 @@
                 try {
                     console.log('🔍 Attempting to fetch reports from database...');
                     
-                    const { data, error } = await supabase
-                        .from('procurement_reports')
-                        .select(`
-                            *,
-                            report_editions (
-                                id,
-                                edition_number,
-                                upload_date,
-                                file_name,
-                                file_path,
-                                file_size,
-                                notes
-                            )
-                        `)
-                        .order('created_date', { ascending: false });
+                    if (user.role === 'Admin') {
+                        // Admins see all reports
+                        const { data, error } = await supabase
+                            .from('procurement_reports')
+                            .select(`
+                                *,
+                                report_editions (
+                                    id,
+                                    edition_number,
+                                    upload_date,
+                                    file_name,
+                                    file_path,
+                                    file_size,
+                                    notes
+                                )
+                            `)
+                            .order('created_date', { ascending: false });
 
-                    if (error) {
-                        console.error('❌ DATABASE ERROR - Reports fetch failed:', error);
-                        console.error('Error message:', error.message);
-                        console.error('Error code:', error.code);
-                        console.error('Error details:', error.details);
-                        
-                        // Show the actual error instead of mock data
-                        alert(`Database Error: ${error.message}\n\nPlease check:\n1. Supabase connection\n2. Table 'procurement_reports' exists\n3. API key permissions\n4. RLS policies`);
-                        
-                        setReports([]);
+                        if (error) {
+                            console.error('❌ DATABASE ERROR - Reports fetch failed:', error);
+                            console.error('Error message:', error.message);
+                            console.error('Error code:', error.code);
+                            console.error('Error details:', error.details);
+                            
+                            // Show the actual error instead of mock data
+                            alert(`Database Error: ${error.message}\n\nPlease check:\n1. Supabase connection\n2. Table 'procurement_reports' exists\n3. API key permissions\n4. RLS policies`);
+                            
+                            setReports([]);
+                        } else {
+                            console.log('✅ Reports fetched successfully (Admin - All reports):', data);
+                            setReports(data || []);
+                        }
                     } else {
-                        console.log('✅ Reports fetched from database successfully:', data);
-                        setReports(data || []);
+                        // Viewers see only reports they have permission for
+                        console.log('🔍 Fetching reports for Viewer with permissions...');
+                        
+                        const { data, error } = await supabase
+                            .from('procurement_reports')
+                            .select(`
+                                *,
+                                report_editions (
+                                    id,
+                                    edition_number,
+                                    upload_date,
+                                    file_name,
+                                    file_path,
+                                    file_size,
+                                    notes
+                                ),
+                                user_report_permissions!inner (
+                                    user_id
+                                )
+                            `)
+                            .eq('user_report_permissions.user_id', user.id)
+                            .order('created_date', { ascending: false });
+
+                        if (error) {
+                            console.error('❌ DATABASE ERROR - Viewer reports fetch failed:', error);
+                            alert(`Database Error: ${error.message}`);
+                            setReports([]);
+                        } else {
+                            console.log('✅ Reports fetched successfully (Viewer - Filtered):', data);
+                            setReports(data || []);
+                        }
                     }
                 } catch (error) {
                     console.error('Error fetching reports:', error);
@@ -1087,6 +1122,96 @@
         }
 
         function UserCard({ user, onUpdateRole, onToggleStatus, onDeleteUser }) {
+            const [showReports, setShowReports] = useState(false);
+            const [availableReports, setAvailableReports] = useState([]);
+            const [userReportAccess, setUserReportAccess] = useState([]);
+            const [loading, setLoading] = useState(false);
+
+            // Fetch available reports and user's current access
+            useEffect(() => {
+                if (user.role === 'Viewer' && showReports) {
+                    fetchReportsAndAccess();
+                }
+            }, [showReports, user.role]);
+
+            const fetchReportsAndAccess = async () => {
+                setLoading(true);
+                try {
+                    // Fetch all available reports
+                    const { data: reports, error: reportsError } = await supabase
+                        .from('procurement_reports')
+                        .select('id, name')
+                        .order('name');
+
+                    if (reportsError) {
+                        console.error('❌ Error fetching reports:', reportsError);
+                        return;
+                    }
+
+                    // Fetch user's current report access
+                    const { data: access, error: accessError } = await supabase
+                        .from('user_report_permissions')
+                        .select('report_id')
+                        .eq('user_id', user.id);
+
+                    if (accessError && accessError.code !== 'PGRST116') {
+                        console.error('❌ Error fetching user access:', accessError);
+                        return;
+                    }
+
+                    setAvailableReports(reports || []);
+                    setUserReportAccess((access || []).map(a => a.report_id));
+                } catch (error) {
+                    console.error('💥 Error in fetchReportsAndAccess:', error);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const toggleReportAccess = async (reportId) => {
+                try {
+                    const hasAccess = userReportAccess.includes(reportId);
+                    
+                    if (hasAccess) {
+                        // Remove access
+                        const { error } = await supabase
+                            .from('user_report_permissions')
+                            .delete()
+                            .eq('user_id', user.id)
+                            .eq('report_id', reportId);
+
+                        if (error) {
+                            console.error('❌ Error removing access:', error);
+                            alert(`Error removing access: ${error.message}`);
+                            return;
+                        }
+
+                        setUserReportAccess(prev => prev.filter(id => id !== reportId));
+                    } else {
+                        // Add access
+                        const { error } = await supabase
+                            .from('user_report_permissions')
+                            .insert([{
+                                user_id: user.id,
+                                report_id: reportId,
+                                granted_by: user.id, // This should be the current admin's ID in real implementation
+                                granted_at: new Date().toISOString()
+                            }]);
+
+                        if (error) {
+                            console.error('❌ Error adding access:', error);
+                            alert(`Error adding access: ${error.message}`);
+                            return;
+                        }
+
+                        setUserReportAccess(prev => [...prev, reportId]);
+                    }
+                } catch (error) {
+                    console.error('💥 Error toggling report access:', error);
+                    alert(`System error: ${error.message}`);
+                }
+            };
+
             return (
                 <div className="bg-gray-50 p-4 rounded-lg border">
                     <div className="flex justify-between items-start mb-3">
@@ -1137,9 +1262,51 @@
                     )}
 
                     {user.role === 'Viewer' && (
-                        <div className="mt-2 text-sm text-gray-600">
-                            <i className="fas fa-eye text-blue-500 mr-1"></i>
-                            Viewer - Read-only access to reports
+                        <div className="mt-3">
+                            <button
+                                onClick={() => setShowReports(!showReports)}
+                                className="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-2"
+                            >
+                                <i className={`fas fa-chevron-${showReports ? 'up' : 'down'}`}></i>
+                                Report Access ({userReportAccess.length} reports)
+                            </button>
+
+                            {showReports && (
+                                <div className="mt-3 p-3 bg-white rounded border">
+                                    {loading ? (
+                                        <div className="text-center py-4">
+                                            <i className="fas fa-spinner fa-spin text-blue-500"></i>
+                                            <p className="text-sm text-gray-500 mt-1">Loading reports...</p>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <div className="text-sm font-medium text-gray-700 mb-2">
+                                                Select accessible reports:
+                                            </div>
+                                            {availableReports.length === 0 ? (
+                                                <p className="text-sm text-gray-500">No reports available yet.</p>
+                                            ) : (
+                                                <div className="space-y-2 max-h-40 overflow-y-auto">
+                                                    {availableReports.map(report => (
+                                                        <label key={report.id} className="flex items-center text-sm">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={userReportAccess.includes(report.id)}
+                                                                onChange={() => toggleReportAccess(report.id)}
+                                                                className="mr-2 rounded text-blue-600 focus:ring-blue-500"
+                                                            />
+                                                            {report.name}
+                                                        </label>
+                                                    ))}
+                                                </div>
+                                            )}
+                                            <div className="mt-2 text-xs text-gray-500">
+                                                Selected: {userReportAccess.length} of {availableReports.length} reports
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
