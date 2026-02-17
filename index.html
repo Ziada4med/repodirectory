@@ -217,31 +217,48 @@
                             console.log('User signed in successfully:', session.user.email);
                             setUser(session.user);
                             
-                            // Look up or create user in database
-                            const { data: dbUser, error: dbError } = await supabase
-                                .from('app_users')
-                                .select('*')
-                                .eq('auth_user_id', session.user.id)
-                                .single();
-                            
-                            if (dbError && dbError.code === 'PGRST116') {
-                                try {
-                                    const newUser = await createUserInDatabase(session.user);
-                                    setCurrentUser(newUser);
+                            // Check if user is registered in our system
+                            try {
+                                const { data: dbUser, error: dbError } = await supabase
+                                    .from('app_users')
+                                    .select('*')
+                                    .eq('email', session.user.email)
+                                    .eq('is_active', true)
+                                    .single();
+                                
+                                if (dbError && dbError.code === 'PGRST116') {
+                                    // User not registered
+                                    console.log('User not registered:', session.user.email);
+                                    await supabase.auth.signOut();
+                                    setAuthError(`Access Denied: Your account (${session.user.email}) is not registered in this system. Please contact your administrator to request access.`);
+                                    return;
+                                } else if (dbError) {
+                                    console.error('Database error:', dbError);
+                                    await supabase.auth.signOut();
+                                    setAuthError(`Database error: ${dbError.message}. Please try again later.`);
+                                    return;
+                                } else if (!dbUser.is_active) {
+                                    // User inactive
+                                    console.log('User account inactive:', session.user.email);
+                                    await supabase.auth.signOut();
+                                    setAuthError(`Access Denied: Your account has been deactivated. Please contact your administrator.`);
+                                    return;
+                                } else {
+                                    // User valid
+                                    console.log('User authorized:', dbUser.email, 'Role:', dbUser.role);
+                                    setCurrentUser(dbUser);
                                     setAuthError(null);
-                                } catch (createError) {
-                                    setAuthError(`Failed to create user: ${createError.message}`);
+                                    
+                                    // Clean URL
+                                    setTimeout(() => {
+                                        window.history.replaceState({}, document.title, window.location.pathname);
+                                    }, 1000);
                                 }
-                            } else if (dbError) {
-                                setAuthError(`Database error: ${dbError.message}`);
-                            } else {
-                                setCurrentUser(dbUser);
-                                setAuthError(null);
+                            } catch (error) {
+                                console.error('Auth verification error:', error);
+                                await supabase.auth.signOut();
+                                setAuthError(`Error verifying account: ${error.message}`);
                             }
-                            
-                            setTimeout(() => {
-                                window.history.replaceState({}, document.title, window.location.pathname);
-                            }, 1000);
                         } else if (event === 'SIGNED_OUT') {
                             console.log('User signed out');
                             setUser(null);
@@ -258,77 +275,29 @@
             const signInWithGoogle = async () => {
                 try {
                     setAuthError(null);
-                    setLoading(true);
-                    console.log('Creating demo user...');
+                    console.log('Starting Google OAuth...');
                     
-                    // Create simple demo user directly in database
-                    const demoEmail = 'demo@repodirectory.com';
-                    const demoUser = {
-                        email: demoEmail,
-                        full_name: 'Demo User',
-                        role: 'Admin',
-                        auth_provider: 'demo',
-                        is_active: true
-                    };
-                    
-                    try {
-                        // Try to insert user directly (will fail if already exists, which is fine)
-                        const { data: newUser, error: insertError } = await supabase
-                            .from('app_users')
-                            .insert([demoUser])
-                            .select()
-                            .single();
-                        
-                        if (insertError && insertError.code === '23505') {
-                            // User already exists, fetch existing user
-                            console.log('User already exists, fetching existing user...');
-                            const { data: existingUser, error: fetchError } = await supabase
-                                .from('app_users')
-                                .select('*')
-                                .eq('email', demoEmail)
-                                .single();
-                            
-                            if (fetchError) {
-                                console.error('Error fetching existing user:', fetchError);
-                                throw fetchError;
+                    const { data, error } = await supabase.auth.signInWithOAuth({
+                        provider: 'google',
+                        options: {
+                            redirectTo: 'https://repodirectory.netlify.app',
+                            queryParams: {
+                                access_type: 'offline',
+                                prompt: 'consent'
                             }
-                            
-                            setCurrentUser(existingUser);
-                            console.log('Existing user loaded:', existingUser);
-                        } else if (insertError) {
-                            console.error('Insert error:', insertError);
-                            throw insertError;
-                        } else {
-                            setCurrentUser(newUser);
-                            console.log('New user created:', newUser);
                         }
-                        
-                        setUser({ id: Date.now(), email: demoEmail });
-                        setAuthError(null);
-                        
-                    } catch (dbError) {
-                        console.error('Database operation failed:', dbError);
-                        
-                        // Create temp user as fallback
-                        const tempUser = {
-                            id: Date.now(),
-                            email: demoEmail,
-                            full_name: 'Demo User (Temp)',
-                            role: 'Admin',
-                            auth_provider: 'demo',
-                            is_active: true
-                        };
-                        
-                        setCurrentUser(tempUser);
-                        setUser({ id: tempUser.id, email: tempUser.email });
-                        setAuthError(`Database error: ${dbError.message}. Using temporary user.`);
+                    });
+                    
+                    if (error) {
+                        console.error('OAuth error:', error);
+                        setAuthError(`Google sign-in failed: ${error.message}`);
+                    } else {
+                        console.log('OAuth initiated successfully');
                     }
                     
                 } catch (error) {
-                    console.error('Demo login error:', error);
-                    setAuthError(`Demo login failed: ${error.message}`);
-                } finally {
-                    setLoading(false);
+                    console.error('OAuth setup error:', error);
+                    setAuthError(`OAuth setup error: ${error.message}`);
                 }
             };
 
@@ -372,24 +341,7 @@
                             <div className="text-center mb-8">
                                 <i className="fas fa-file-alt text-5xl text-blue-600 mb-4"></i>
                                 <h1 className="text-2xl font-bold text-gray-900">Procurement Reports</h1>
-                                <p className="text-gray-600">Repository Access</p>
-                            </div>
-
-                            <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-                                <div className="flex items-start">
-                                    <i className="fas fa-exclamation-triangle text-yellow-600 mr-2 mt-0.5"></i>
-                                    <div className="text-sm text-yellow-700">
-                                        <div className="font-medium mb-2">Database Permissions Issue</div>
-                                        <div className="mb-2">Your database tables need permissions configured.</div>
-                                        <div className="text-xs">
-                                            <strong>To fix:</strong><br/>
-                                            1. Go to Supabase Dashboard → SQL Editor<br/>
-                                            2. Run: ALTER TABLE app_users DISABLE ROW LEVEL SECURITY;<br/>
-                                            3. Grant permissions with provided SQL script<br/>
-                                            4. This will allow the app to access the database
-                                        </div>
-                                    </div>
-                                </div>
+                                <p className="text-gray-600">Repository Access - Authorized Users Only</p>
                             </div>
 
                             {authError && (
@@ -403,6 +355,22 @@
                                 </div>
                             )}
 
+                            <div className="mb-6">
+                                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                                    <div className="flex items-start">
+                                        <i className="fas fa-info-circle text-blue-600 mr-2 mt-0.5"></i>
+                                        <div className="text-sm text-blue-700">
+                                            <div className="font-medium mb-1">Access Requirements:</div>
+                                            <ul className="list-disc list-inside text-xs space-y-1">
+                                                <li>You must be registered in the system</li>
+                                                <li>Your account must be active</li>
+                                                <li>Contact your administrator if you need access</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
                             <button
                                 onClick={onGoogleSignIn}
                                 className="w-full flex items-center justify-center gap-3 bg-white border border-gray-300 rounded-lg px-4 py-3 text-gray-700 hover:bg-gray-50 transition-colors"
@@ -413,7 +381,7 @@
                                     <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
                                     <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
                                 </svg>
-                                Demo Login (Tests Database)
+                                Sign in with Google
                             </button>
                         </div>
                     </div>
