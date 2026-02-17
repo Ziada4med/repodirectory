@@ -350,100 +350,17 @@
                         .order('created_date', { ascending: false });
 
                     if (error) {
-                        console.error('Database error, using mock data:', error);
+                        console.error('❌ DATABASE ERROR - Reports fetch failed:', error);
+                        console.error('Error message:', error.message);
+                        console.error('Error code:', error.code);
+                        console.error('Error details:', error.details);
                         
-                        // Use mock data when database fails
-                        const mockReports = [
-                            {
-                                id: 'mock-1',
-                                name: 'Monthly Procurement Summary',
-                                description: 'Comprehensive monthly overview of all procurement activities, vendor performance, and cost analysis.',
-                                frequency: 'Monthly',
-                                created_date: new Date().toISOString(),
-                                created_by: user.id,
-                                report_editions: [
-                                    {
-                                        id: 'edition-1',
-                                        edition_number: 3,
-                                        upload_date: new Date(Date.now() - 86400000).toISOString(),
-                                        file_name: 'Procurement_Summary_Oct_2024.pdf',
-                                        file_path: 'mock-path-1',
-                                        file_size: 2048000,
-                                        notes: 'Updated with Q4 vendor assessments'
-                                    },
-                                    {
-                                        id: 'edition-2', 
-                                        edition_number: 2,
-                                        upload_date: new Date(Date.now() - 2592000000).toISOString(),
-                                        file_name: 'Procurement_Summary_Sep_2024.pdf',
-                                        file_path: 'mock-path-2',
-                                        file_size: 1856000,
-                                        notes: 'Initial September report'
-                                    }
-                                ]
-                            },
-                            {
-                                id: 'mock-2',
-                                name: 'Vendor Performance Analysis',
-                                description: 'Quarterly analysis of vendor delivery times, quality metrics, and cost effectiveness.',
-                                frequency: 'Quarterly',
-                                created_date: new Date(Date.now() - 86400000).toISOString(),
-                                created_by: user.id,
-                                report_editions: [
-                                    {
-                                        id: 'edition-3',
-                                        edition_number: 1,
-                                        upload_date: new Date(Date.now() - 172800000).toISOString(),
-                                        file_name: 'Vendor_Performance_Q3_2024.xlsx',
-                                        file_path: 'mock-path-3',
-                                        file_size: 1024000,
-                                        notes: 'Q3 performance metrics with recommendations'
-                                    }
-                                ]
-                            },
-                            {
-                                id: 'mock-3',
-                                name: 'Cost Savings Report',
-                                description: 'Annual report highlighting cost reduction initiatives and savings achieved through strategic procurement.',
-                                frequency: 'Annual',
-                                created_date: new Date(Date.now() - 259200000).toISOString(),
-                                created_by: user.id,
-                                report_editions: []
-                            },
-                            {
-                                id: 'mock-4', 
-                                name: 'Emergency Purchase Orders',
-                                description: 'Ad-hoc report for urgent procurement requests and emergency purchase approvals.',
-                                frequency: 'Ad-hoc',
-                                created_date: new Date(Date.now() - 432000000).toISOString(),
-                                created_by: user.id,
-                                report_editions: [
-                                    {
-                                        id: 'edition-4',
-                                        edition_number: 5,
-                                        upload_date: new Date(Date.now() - 86400000).toISOString(),
-                                        file_name: 'Emergency_POs_Oct_Week2.docx',
-                                        file_path: 'mock-path-4',
-                                        file_size: 512000,
-                                        notes: 'Week 2 emergency purchases summary'
-                                    },
-                                    {
-                                        id: 'edition-5',
-                                        edition_number: 4,
-                                        upload_date: new Date(Date.now() - 604800000).toISOString(),
-                                        file_name: 'Emergency_POs_Oct_Week1.docx', 
-                                        file_path: 'mock-path-5',
-                                        file_size: 768000,
-                                        notes: 'Week 1 emergency purchases summary'
-                                    }
-                                ]
-                            }
-                        ];
+                        // Show the actual error instead of mock data
+                        alert(`Database Error: ${error.message}\n\nPlease check:\n1. Supabase connection\n2. Table 'procurement_reports' exists\n3. API key permissions\n4. RLS policies`);
                         
-                        console.log('📊 Using mock reports data');
-                        setReports(mockReports);
+                        setReports([]);
                     } else {
-                        console.log('✅ Reports fetched from database');
+                        console.log('✅ Reports fetched from database successfully:', data);
                         setReports(data || []);
                     }
                 } catch (error) {
@@ -473,11 +390,7 @@
 
             const downloadFile = async (filePath, fileName) => {
                 try {
-                    if (filePath.startsWith('mock-')) {
-                        console.log('📁 Mock file download:', fileName);
-                        alert(`Mock download: ${fileName}\n\nIn a real system, this would download the actual file from storage.`);
-                        return;
-                    }
+                    // All file downloads should go through real storage now
                     
                     const { data, error } = await supabase.storage
                         .from('report-files')
@@ -495,7 +408,7 @@
                     URL.revokeObjectURL(url);
                 } catch (error) {
                     console.error('Error downloading file:', error);
-                    alert('Error downloading file - this may be mock data or a storage issue.');
+                    alert('Error downloading file - please check storage connection.');
                 }
             };
 
@@ -898,10 +811,10 @@
                 setLoading(true);
 
                 try {
-                    console.log('🔄 Adding edition (mock mode)...');
+                    console.log('🔄 Adding edition to database...');
                     
                     // Simulate success
-                    alert(`Edition "${formData.file.name}" added successfully!\n\nNote: File uploaded as mock data since storage is not connected.`);
+                    alert(`Edition "${formData.file.name}" added successfully!`);
                     onSuccess();
                 } catch (error) {
                     console.error('Error adding edition:', error);
