@@ -114,22 +114,20 @@
                     
                     console.log('Database query result:', { dbUser, dbError });
                     
-                    if (dbError && dbError.code === 'PGRST116') {
-                        // User not registered
-                        console.log('❌ User not registered:', userEmail);
-                        setAuthError(`Access Denied: Your account (${userEmail}) is not registered in this system. Please contact your administrator to request access.`);
-                        window.history.replaceState({}, document.title, window.location.pathname);
-                        setLoading(false);
-                        return;
-                    } else if (dbError) {
-                        console.error('Database error details:', {
-                            message: dbError.message,
-                            code: dbError.code,
-                            details: dbError.details,
-                            hint: dbError.hint,
-                            dbError: dbError
-                        });
-                        setAuthError(`Database error: ${dbError.message}. Please try again later.`);
+                    if (dbError) {
+                        console.error('❌ Database error occurred:');
+                        console.error('Error message:', dbError.message);
+                        console.error('Error code:', dbError.code);
+                        console.error('Full error JSON:', JSON.stringify(dbError, null, 2));
+                        
+                        if (dbError.code === 'PGRST116') {
+                            // User not registered
+                            console.log('User not found in database:', userEmail);
+                            setAuthError(`Access Denied: Your account (${userEmail}) is not registered in this system. Please contact your administrator to request access.`);
+                        } else {
+                            setAuthError(`Database error: ${dbError.message || 'Unknown database error'}. Please try again later.`);
+                        }
+                        
                         window.history.replaceState({}, document.title, window.location.pathname);
                         setLoading(false);
                         return;
