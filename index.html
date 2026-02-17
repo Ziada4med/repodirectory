@@ -59,7 +59,32 @@
                 console.log('App initializing...');
                 console.log('Current URL:', window.location.href);
                 
-                // Clear any error parameters from URL
+                // Check if we're being redirected back from OAuth with an error
+                const urlParams = new URLSearchParams(window.location.search);
+                const hashParams = new URLSearchParams(window.location.hash.substring(1));
+                
+                const error = urlParams.get('error') || hashParams.get('error');
+                const errorDescription = urlParams.get('error_description') || hashParams.get('error_description');
+                
+                if (error && error === 'server_error' && errorDescription && errorDescription.includes('Database error saving new user')) {
+                    console.log('Detected Supabase auto-user creation error, attempting to continue anyway...');
+                    
+                    // Try to extract access token from the URL anyway
+                    const accessToken = hashParams.get('access_token');
+                    const refreshToken = hashParams.get('refresh_token');
+                    
+                    if (accessToken) {
+                        console.log('Found access token despite error, processing manually...');
+                        processOAuthManually(accessToken, refreshToken);
+                        return;
+                    }
+                    
+                    setAuthError('Authentication failed due to database configuration. Please contact administrator.');
+                    window.history.replaceState({}, document.title, window.location.pathname);
+                    return;
+                }
+                
+                // Clear any other error parameters from URL
                 if (window.location.search.includes('error') || window.location.hash.includes('error')) {
                     console.log('Clearing error parameters from URL...');
                     window.history.replaceState({}, document.title, window.location.pathname);
@@ -67,6 +92,73 @@
                 
                 initializeAuth();
             }, []);
+
+            const processOAuthManually = async (accessToken, refreshToken) => {
+                try {
+                    console.log('Processing OAuth tokens manually...');
+                    
+                    // Get user info from Google
+                    const response = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+                        headers: {
+                            'Authorization': `Bearer ${accessToken}`
+                        }
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error('Failed to get user info from Google');
+                    }
+                    
+                    const googleUser = await response.json();
+                    console.log('Google user info:', googleUser.email);
+                    
+                    // Check if user exists in our database
+                    const { data: dbUser, error: dbError } = await supabase
+                        .from('app_users')
+                        .select('*')
+                        .eq('email', googleUser.email)
+                        .eq('is_active', true)
+                        .single();
+                    
+                    if (dbError && dbError.code === 'PGRST116') {
+                        // User not registered
+                        setAuthError(`Access Denied: Your account (${googleUser.email}) is not registered in this system. Please contact your administrator to request access.`);
+                        window.history.replaceState({}, document.title, window.location.pathname);
+                        return;
+                    } else if (dbError) {
+                        console.error('Database error:', dbError);
+                        setAuthError(`Database error: ${dbError.message}. Please try again later.`);
+                        window.history.replaceState({}, document.title, window.location.pathname);
+                        return;
+                    }
+                    
+                    // User found and valid
+                    console.log('User authorized:', dbUser.email, 'Role:', dbUser.role);
+                    
+                    // Create a mock auth user object
+                    const authUser = {
+                        id: googleUser.id,
+                        email: googleUser.email,
+                        user_metadata: {
+                            full_name: googleUser.name,
+                            name: googleUser.name
+                        }
+                    };
+                    
+                    setUser(authUser);
+                    setCurrentUser(dbUser);
+                    setAuthError(null);
+                    setLoading(false);
+                    
+                    // Clean URL
+                    window.history.replaceState({}, document.title, window.location.pathname);
+                    
+                } catch (error) {
+                    console.error('Manual OAuth processing error:', error);
+                    setAuthError(`Authentication processing failed: ${error.message}`);
+                    window.history.replaceState({}, document.title, window.location.pathname);
+                    setLoading(false);
+                }
+            };
 
             const createUserInDatabase = async (authUser) => {
                 try {
