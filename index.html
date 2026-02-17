@@ -93,31 +93,47 @@
             };
 
             const fetchCurrentUser = async (authUser) => {
-                try {
-                    const { data, error } = await supabase
-                        .from('app_users')
-                        .select('*')
-                        .or(`auth_user_id.eq.${authUser.id},email.eq.${authUser.email}`)
-                        .eq('is_active', true)
-                        .single();
+    try {
+        let { data, error } = await supabase
+            .from('app_users')
+            .select('*')
+            .or(`auth_user_id.eq.${authUser.id},email.eq.${authUser.email}`)
+            .eq('is_active', true)
+            .single();
 
-                    if (error) {
-                        if (error.code === 'PGRST116') {
-                            // User not found, create manually
-                            await createUserProfile(authUser);
-                            return;
-                        }
-                        setAuthError(`User profile not found in database. Error: ${error.message}`);
-                    } else {
-                        setCurrentUser(data);
-                        setAuthError(null);
-                    }
-                } catch (error) {
-                    setAuthError(`Error loading user profile: ${error.message}`);
-                } finally {
-                    setLoading(false);
-                }
-            };
+        if (error && error.code === 'PGRST116') {
+            // User not found, create one
+            const { data: newUser, error: createError } = await supabase
+                .from('app_users')
+                .insert([{
+                    email: authUser.email,
+                    full_name: authUser.user_metadata?.full_name || authUser.user_metadata?.name || authUser.email,
+                    role: 'Viewer',
+                    auth_provider: 'google',
+                    auth_user_id: authUser.id,
+                    is_active: true
+                }])
+                .select()
+                .single();
+
+            if (createError) {
+                setAuthError(`Failed to create user profile: ${createError.message}`);
+            } else {
+                setCurrentUser(newUser);
+                setAuthError(null);
+            }
+        } else if (error) {
+            setAuthError(`User profile error: ${error.message}`);
+        } else {
+            setCurrentUser(data);
+            setAuthError(null);
+        }
+    } catch (error) {
+        setAuthError(`Error loading user profile: ${error.message}`);
+    } finally {
+        setLoading(false);
+    }
+};
 
             const createUserProfile = async (authUser) => {
                 try {
@@ -359,7 +375,8 @@
             );
         }
 
-        ReactDOM.render(<App />, document.getElementById('root'));
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
     </script>
 </body>
 </html>
