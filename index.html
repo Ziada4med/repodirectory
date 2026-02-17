@@ -123,13 +123,28 @@
             const signInWithGoogle = async () => {
                 try {
                     setAuthError(null);
+                    console.log('Starting Google OAuth...');
+                    
+                    // First, let's try to disable the automatic user creation by using a different approach
                     const { data, error } = await supabase.auth.signInWithOAuth({
                         provider: 'google',
                         options: {
-                            redirectTo: 'https://repodirectory.netlify.app'
+                            redirectTo: 'https://repodirectory.netlify.app',
+                            queryParams: {
+                                access_type: 'offline',
+                                prompt: 'consent'
+                            }
                         }
                     });
+                    
+                    if (error) {
+                        console.error('OAuth error:', error);
+                        setAuthError(`Google OAuth failed: ${error.message}`);
+                    } else {
+                        console.log('OAuth initiated successfully');
+                    }
                 } catch (error) {
+                    console.error('OAuth setup error:', error);
                     setAuthError(`OAuth setup error: ${error.message}`);
                 }
             };
