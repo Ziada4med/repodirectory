@@ -269,7 +269,10 @@
                         };
                         setCurrentUser(tempUser);
                         setUser(demoAuthUser);
-                        setAuthError(`Note: Database creation failed (${createError.message}), using temp user`);
+                        
+                        // Show the real error, not "Invalid API key"
+                        const errorMsg = createError.message || createError.toString();
+                        setAuthError(`Database error: ${errorMsg}. This is likely a permissions issue, not an API key problem.`);
                     }
                     
                 } catch (error) {
@@ -327,14 +330,14 @@
                                 <div className="flex items-start">
                                     <i className="fas fa-exclamation-triangle text-yellow-600 mr-2 mt-0.5"></i>
                                     <div className="text-sm text-yellow-700">
-                                        <div className="font-medium mb-2">Supabase API Key Issue</div>
-                                        <div className="mb-2">Your Supabase API key may have expired or changed.</div>
+                                        <div className="font-medium mb-2">Database Permissions Issue</div>
+                                        <div className="mb-2">Your database tables need permissions configured.</div>
                                         <div className="text-xs">
                                             <strong>To fix:</strong><br/>
-                                            1. Go to your Supabase Dashboard<br/>
-                                            2. Settings → API<br/>
-                                            3. Copy the "anon/public" key<br/>
-                                            4. Replace the key in your HTML file
+                                            1. Go to Supabase Dashboard → SQL Editor<br/>
+                                            2. Run: ALTER TABLE app_users DISABLE ROW LEVEL SECURITY;<br/>
+                                            3. Grant permissions with provided SQL script<br/>
+                                            4. This will allow the app to access the database
                                         </div>
                                     </div>
                                 </div>
