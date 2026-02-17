@@ -1302,42 +1302,6 @@
                 </div>
             );
         }
-                                                <input
-                                                    type="checkbox"
-                                                    checked={formData.accessible_reports.includes(report.id)}
-                                                    onChange={() => handleReportToggle(report.id)}
-                                                    className="mr-2 rounded text-blue-600"
-                                                />
-                                                {report.name}
-                                            </label>
-                                        ))}
-                                    </div>
-                                    <div className="text-xs text-gray-500 mt-1">
-                                        Selected: {formData.accessible_reports.length} reports
-                                    </div>
-                                </div>
-                            )}
-
-                            <div className="flex gap-3 pt-4">
-                                <button
-                                    type="button"
-                                    onClick={onClose}
-                                    className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    type="submit"
-                                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                                >
-                                    Add User
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            );
-        }
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
