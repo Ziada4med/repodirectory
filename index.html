@@ -36,17 +36,26 @@
                 console.log('Hash:', window.location.hash);
                 console.log('Search:', window.location.search);
                 
-                // Don't clear URL immediately - let Supabase process the OAuth callback first
+                // Clear the error parameters immediately to prevent Supabase from failing
+                if (window.location.search.includes('error=server_error') || window.location.hash.includes('error=server_error')) {
+                    console.log('Clearing database error parameters...');
+                    window.history.replaceState({}, document.title, window.location.pathname);
+                }
+                
+                // Give Supabase time to process any valid OAuth tokens
                 setTimeout(() => {
                     initializeAuth();
-                }, 100);
+                }, 500);
             }, []);
 
             const initializeAuth = async () => {
                 try {
+                    console.log('Getting session...');
                     const { data: { session }, error } = await supabase.auth.getSession();
+                    console.log('Session result:', session?.user?.email, error?.message);
                     
                     if (session?.user) {
+                        console.log('Found existing session, creating temp user...');
                         setUser(session.user);
                         // Skip database lookup completely
                         const tempUser = {
@@ -60,7 +69,9 @@
                         };
                         setCurrentUser(tempUser);
                         setAuthError(null);
+                        console.log('Temp user created:', tempUser);
                     } else {
+                        console.log('No session found');
                         const manualUser = localStorage.getItem('manual_user');
                         if (manualUser) {
                             try {
