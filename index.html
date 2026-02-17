@@ -47,12 +47,25 @@
                 try {
                     console.log('Creating user in app_users table:', authUser.email);
                     
+                    // First try to find existing user
+                    const { data: existingUser } = await supabase
+                        .from('app_users')
+                        .select('*')
+                        .eq('email', authUser.email)
+                        .single();
+                    
+                    if (existingUser) {
+                        console.log('User already exists in database:', existingUser.email);
+                        return existingUser;
+                    }
+                    
+                    // User doesn't exist, create new one
                     const { data, error } = await supabase
                         .from('app_users')
                         .insert([{
                             email: authUser.email,
                             full_name: authUser.user_metadata?.full_name || authUser.user_metadata?.name || authUser.email,
-                            role: 'Admin',
+                            role: 'Viewer', // Default to Viewer, not Admin
                             auth_provider: 'google',
                             auth_user_id: authUser.id,
                             is_active: true
@@ -187,8 +200,8 @@
                         const tempUser = {
                             id: demoAuthUser.id,
                             email: demoAuthUser.email,
-                            full_name: 'Demo Admin User',
-                            role: 'Admin',
+                            full_name: 'Demo User',
+                            role: 'Viewer', // Default to Viewer
                             auth_provider: 'demo',
                             auth_user_id: demoAuthUser.id,
                             is_active: true
