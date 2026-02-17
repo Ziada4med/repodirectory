@@ -95,7 +95,8 @@
 
                     if (error) {
                         if (error.code === 'PGRST116') {
-                            setTimeout(() => fetchCurrentUser(authUser), 3000);
+                            // User not found, create manually
+                            await createUserProfile(authUser);
                             return;
                         }
                         setAuthError(`User profile not found in database. Error: ${error.message}. Please contact your administrator.`);
@@ -110,19 +111,38 @@
                 }
             };
 
+            const createUserProfile = async (authUser) => {
+                try {
+                    const { data, error } = await supabase
+                        .from('app_users')
+                        .insert([{
+                            email: authUser.email,
+                            full_name: authUser.user_metadata?.full_name || authUser.email,
+                            role: 'Viewer', // Default role
+                            auth_provider: 'google',
+                            auth_user_id: authUser.id,
+                            is_active: true
+                        }])
+                        .select()
+                        .single();
+
+                    if (error) throw error;
+                    
+                    setCurrentUser(data);
+                    setAuthError(null);
+                } catch (error) {
+                    setAuthError(`Failed to create user profile: ${error.message}`);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
             const signInWithGoogle = async () => {
                 try {
                     setAuthError(null);
 
                     const { data, error } = await supabase.auth.signInWithOAuth({
-                        provider: 'google',
-                        options: {
-                            redirectTo: 'https://repodirectory.netlify.app',
-                            queryParams: {
-                                access_type: 'offline',
-                                prompt: 'consent',
-                            },
-                        }
+                        provider: 'google'
                     });
                     
                     if (error) {
