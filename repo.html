@@ -1,0 +1,1079 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Procurement Reports Repository</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-50">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // Initialize Supabase client - Replace with your actual values
+        const supabaseUrl = 'YOUR_SUPABASE_URL';
+        const supabaseKey = 'YOUR_SUPABASE_ANON_KEY';
+        const supabase = supabase.createClient(supabaseUrl, supabaseKey);
+
+        function App() {
+            const [user, setUser] = useState(null);
+            const [currentUser, setCurrentUser] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [showLogin, setShowLogin] = useState(false);
+
+            useEffect(() => {
+                // Check active session
+                supabase.auth.getSession().then(({ data: { session } }) => {
+                    setUser(session?.user ?? null);
+                    if (session?.user) {
+                        fetchCurrentUser(session.user);
+                    } else {
+                        setLoading(false);
+                    }
+                });
+
+                // Listen for auth changes
+                const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+                    setUser(session?.user ?? null);
+                    if (session?.user) {
+                        fetchCurrentUser(session.user);
+                    } else {
+                        setCurrentUser(null);
+                        setLoading(false);
+                    }
+                });
+
+                return () => subscription.unsubscribe();
+            }, []);
+
+            const fetchCurrentUser = async (authUser) => {
+                try {
+                    const { data, error } = await supabase
+                        .from('app_users')
+                        .select('*')
+                        .or(`auth_user_id.eq.${authUser.id},email.eq.${authUser.email}`)
+                        .eq('is_active', true)
+                        .single();
+
+                    if (error) {
+                        console.error('Error fetching user:', error);
+                        setShowLogin(true);
+                    } else {
+                        setCurrentUser(data);
+                    }
+                } catch (error) {
+                    console.error('Error fetching current user:', error);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const signInWithGoogle = async () => {
+                try {
+                    const { error } = await supabase.auth.signInWithOAuth({
+                        provider: 'google',
+                        options: {
+                            redirectTo: window.location.origin
+                        }
+                    });
+                    if (error) throw error;
+                } catch (error) {
+                    console.error('Error signing in with Google:', error);
+                    alert('Error signing in with Google');
+                }
+            };
+
+            const signOut = async () => {
+                try {
+                    const { error } = await supabase.auth.signOut();
+                    if (error) throw error;
+                } catch (error) {
+                    console.error('Error signing out:', error);
+                }
+            };
+
+            if (loading) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center">
+                        <div className="text-center">
+                            <i className="fas fa-spinner fa-spin text-4xl text-blue-500 mb-4"></i>
+                            <p className="text-gray-600">Loading...</p>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (!user || !currentUser || showLogin) {
+                return <LoginScreen onGoogleSignIn={signInWithGoogle} />;
+            }
+
+            return <Dashboard user={currentUser} onSignOut={signOut} />;
+        }
+
+        function LoginScreen({ onGoogleSignIn }) {
+            const [showManualLogin, setShowManualLogin] = useState(false);
+            const [loginForm, setLoginForm] = useState({ email: '', password: '' });
+            const [loading, setLoading] = useState(false);
+
+            const handleManualLogin = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+
+                try {
+                    // For manual users, we'll use a custom login endpoint
+                    // This is a simplified approach - in production, implement proper authentication
+                    const { data, error } = await supabase
+                        .from('app_users')
+                        .select('*')
+                        .eq('email', loginForm.email)
+                        .eq('auth_provider', 'manual')
+                        .eq('is_active', true)
+                        .single();
+
+                    if (error || !data) {
+                        throw new Error('Invalid credentials');
+                    }
+
+                    // In production, you'd verify the password hash here
+                    // For now, we'll create a custom session
+                    localStorage.setItem('manual_user', JSON.stringify(data));
+                    window.location.reload();
+                } catch (error) {
+                    console.error('Manual login error:', error);
+                    alert('Invalid credentials');
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+                    <div className="max-w-md w-full mx-4">
+                        <div className="bg-white rounded-lg shadow-lg p-8">
+                            <div className="text-center mb-8">
+                                <i className="fas fa-file-alt text-5xl text-blue-600 mb-4"></i>
+                                <h1 className="text-2xl font-bold text-gray-900">Procurement Reports</h1>
+                                <p className="text-gray-600">Repository Access</p>
+                            </div>
+
+                            {!showManualLogin ? (
+                                <div className="space-y-4">
+                                    <button
+                                        onClick={onGoogleSignIn}
+                                        className="w-full flex items-center justify-center gap-3 bg-white border border-gray-300 rounded-lg px-4 py-3 text-gray-700 hover:bg-gray-50 transition-colors"
+                                    >
+                                        <svg className="w-5 h-5" viewBox="0 0 24 24">
+                                            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                                            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                                            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                                            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                                        </svg>
+                                        Sign in with Google
+                                    </button>
+
+                                    <div className="text-center">
+                                        <span className="text-gray-500">or</span>
+                                    </div>
+
+                                    <button
+                                        onClick={() => setShowManualLogin(true)}
+                                        className="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-3 rounded-lg transition-colors"
+                                    >
+                                        Sign in with Email
+                                    </button>
+                                </div>
+                            ) : (
+                                <form onSubmit={handleManualLogin} className="space-y-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                                            Email
+                                        </label>
+                                        <input
+                                            type="email"
+                                            required
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                            value={loginForm.email}
+                                            onChange={(e) => setLoginForm({...loginForm, email: e.target.value})}
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                                            Password
+                                        </label>
+                                        <input
+                                            type="password"
+                                            required
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                            value={loginForm.password}
+                                            onChange={(e) => setLoginForm({...loginForm, password: e.target.value})}
+                                        />
+                                    </div>
+
+                                    <button
+                                        type="submit"
+                                        disabled={loading}
+                                        className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-3 rounded-lg disabled:opacity-50"
+                                    >
+                                        {loading ? 'Signing in...' : 'Sign In'}
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowManualLogin(false)}
+                                        className="w-full text-gray-600 hover:text-gray-800"
+                                    >
+                                        Back to Google Sign In
+                                    </button>
+                                </form>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function Dashboard({ user, onSignOut }) {
+            const [reports, setReports] = useState([]);
+            const [filteredReports, setFilteredReports] = useState([]);
+            const [searchTerm, setSearchTerm] = useState('');
+            const [selectedFrequency, setSelectedFrequency] = useState('');
+            const [loading, setLoading] = useState(true);
+            const [showAddForm, setShowAddForm] = useState(false);
+            const [showUserManagement, setShowUserManagement] = useState(false);
+
+            const isAdmin = user.role === 'Admin';
+
+            useEffect(() => {
+                fetchReports();
+            }, []);
+
+            useEffect(() => {
+                filterReports();
+            }, [searchTerm, selectedFrequency, reports]);
+
+            const fetchReports = async () => {
+                try {
+                    const { data, error } = await supabase
+                        .from('procurement_reports')
+                        .select(`
+                            *,
+                            report_editions (
+                                id,
+                                edition_number,
+                                upload_date,
+                                file_name,
+                                file_path,
+                                file_size,
+                                notes
+                            )
+                        `)
+                        .order('created_date', { ascending: false });
+
+                    if (error) throw error;
+                    setReports(data || []);
+                } catch (error) {
+                    console.error('Error fetching reports:', error);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const filterReports = () => {
+                let filtered = reports;
+
+                if (searchTerm) {
+                    filtered = filtered.filter(report =>
+                        report.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                        report.description.toLowerCase().includes(searchTerm.toLowerCase())
+                    );
+                }
+
+                if (selectedFrequency) {
+                    filtered = filtered.filter(report => report.frequency === selectedFrequency);
+                }
+
+                setFilteredReports(filtered);
+            };
+
+            const downloadFile = async (filePath, fileName) => {
+                try {
+                    const { data, error } = await supabase.storage
+                        .from('report-files')
+                        .download(filePath);
+
+                    if (error) throw error;
+
+                    const url = URL.createObjectURL(data);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = fileName;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                } catch (error) {
+                    console.error('Error downloading file:', error);
+                    alert('Error downloading file');
+                }
+            };
+
+            const frequencies = ['Daily', 'Weekly', 'Monthly', 'Quarterly', 'Annual', 'Ad-hoc'];
+
+            if (loading) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center">
+                        <div className="text-center">
+                            <i className="fas fa-spinner fa-spin text-4xl text-blue-500 mb-4"></i>
+                            <p className="text-gray-600">Loading reports...</p>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen bg-gray-50">
+                    {/* Header */}
+                    <header className="bg-white shadow-sm border-b">
+                        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+                            <div className="flex justify-between items-center">
+                                <div className="flex items-center gap-4">
+                                    <div>
+                                        <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-3">
+                                            <i className="fas fa-file-alt text-blue-600"></i>
+                                            Procurement Reports Repository
+                                        </h1>
+                                        <p className="text-gray-600 text-sm">
+                                            Welcome back, {user.full_name} ({user.role})
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="flex items-center gap-3">
+                                    {isAdmin && (
+                                        <>
+                                            <button
+                                                onClick={() => setShowUserManagement(true)}
+                                                className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg flex items-center gap-2 transition-colors"
+                                            >
+                                                <i className="fas fa-users"></i>
+                                                Users
+                                            </button>
+                                            <button
+                                                onClick={() => setShowAddForm(true)}
+                                                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors"
+                                            >
+                                                <i className="fas fa-plus"></i>
+                                                Add Report
+                                            </button>
+                                        </>
+                                    )}
+                                    <button
+                                        onClick={onSignOut}
+                                        className="text-gray-500 hover:text-gray-700 px-3 py-2"
+                                    >
+                                        <i className="fas fa-sign-out-alt"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </header>
+
+                    <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                        {/* Filters */}
+                        <div className="bg-white p-6 rounded-lg shadow-sm mb-8">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                                        Search Reports
+                                    </label>
+                                    <div className="relative">
+                                        <i className="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"></i>
+                                        <input
+                                            type="text"
+                                            placeholder="Search by name or description..."
+                                            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                            value={searchTerm}
+                                            onChange={(e) => setSearchTerm(e.target.value)}
+                                        />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                                        Filter by Frequency
+                                    </label>
+                                    <select
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        value={selectedFrequency}
+                                        onChange={(e) => setSelectedFrequency(e.target.value)}
+                                    >
+                                        <option value="">All Frequencies</option>
+                                        {frequencies.map(freq => (
+                                            <option key={freq} value={freq}>{freq}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Reports Grid */}
+                        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+                            {filteredReports.map(report => (
+                                <ReportCard 
+                                    key={report.id} 
+                                    report={report} 
+                                    user={user}
+                                    onUpdate={fetchReports}
+                                    onDownload={downloadFile}
+                                />
+                            ))}
+                        </div>
+
+                        {filteredReports.length === 0 && (
+                            <div className="text-center py-12">
+                                <i className="fas fa-search text-6xl text-gray-300 mb-4"></i>
+                                <h3 className="text-lg font-medium text-gray-900 mb-2">No reports found</h3>
+                                <p className="text-gray-500">
+                                    {isAdmin ? 'Try adjusting your search criteria or add a new report.' : 'Try adjusting your search criteria.'}
+                                </p>
+                            </div>
+                        )}
+                    </main>
+
+                    {/* Modals */}
+                    {showAddForm && isAdmin && (
+                        <AddReportModal
+                            user={user}
+                            onClose={() => setShowAddForm(false)}
+                            onSuccess={() => {
+                                setShowAddForm(false);
+                                fetchReports();
+                            }}
+                        />
+                    )}
+
+                    {showUserManagement && isAdmin && (
+                        <UserManagementModal
+                            onClose={() => setShowUserManagement(false)}
+                        />
+                    )}
+                </div>
+            );
+        }
+
+        function ReportCard({ report, user, onUpdate, onDownload }) {
+            const [showEditions, setShowEditions] = useState(false);
+            const [showAddEdition, setShowAddEdition] = useState(false);
+
+            const isAdmin = user.role === 'Admin';
+
+            const getFrequencyColor = (frequency) => {
+                const colors = {
+                    'Daily': 'bg-green-100 text-green-800',
+                    'Weekly': 'bg-blue-100 text-blue-800',
+                    'Monthly': 'bg-purple-100 text-purple-800',
+                    'Quarterly': 'bg-yellow-100 text-yellow-800',
+                    'Annual': 'bg-red-100 text-red-800',
+                    'Ad-hoc': 'bg-gray-100 text-gray-800'
+                };
+                return colors[frequency] || 'bg-gray-100 text-gray-800';
+            };
+
+            const latestEdition = report.report_editions?.length > 0 
+                ? report.report_editions.sort((a, b) => new Date(b.upload_date) - new Date(a.upload_date))[0]
+                : null;
+
+            return (
+                <div className="bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow">
+                    <div className="p-6">
+                        <div className="flex justify-between items-start mb-4">
+                            <h3 className="text-lg font-semibold text-gray-900">
+                                {report.name}
+                            </h3>
+                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${getFrequencyColor(report.frequency)}`}>
+                                {report.frequency}
+                            </span>
+                        </div>
+
+                        <p className="text-gray-600 text-sm mb-4">
+                            {report.description}
+                        </p>
+
+                        <div className="space-y-2 mb-4">
+                            <div className="flex justify-between text-sm">
+                                <span className="text-gray-500">Total Editions:</span>
+                                <span className="font-medium">{report.report_editions?.length || 0}</span>
+                            </div>
+                            {latestEdition && (
+                                <div className="flex justify-between text-sm">
+                                    <span className="text-gray-500">Latest Edition:</span>
+                                    <span className="font-medium">
+                                        {new Date(latestEdition.upload_date).toLocaleDateString()}
+                                    </span>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => setShowEditions(!showEditions)}
+                                className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-lg text-sm transition-colors"
+                            >
+                                <i className="fas fa-list mr-2"></i>
+                                {showEditions ? 'Hide' : 'View'} Editions
+                            </button>
+                            {isAdmin && (
+                                <button
+                                    onClick={() => setShowAddEdition(true)}
+                                    className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm transition-colors"
+                                >
+                                    <i className="fas fa-plus"></i>
+                                </button>
+                            )}
+                        </div>
+                    </div>
+
+                    {showEditions && (
+                        <div className="border-t bg-gray-50 p-4">
+                            <h4 className="font-medium text-gray-900 mb-3">Report Editions</h4>
+                            {report.report_editions?.length > 0 ? (
+                                <div className="space-y-2 max-h-48 overflow-y-auto">
+                                    {report.report_editions
+                                        .sort((a, b) => new Date(b.upload_date) - new Date(a.upload_date))
+                                        .map(edition => (
+                                        <div key={edition.id} className="bg-white p-3 rounded border text-sm">
+                                            <div className="flex justify-between items-start">
+                                                <div className="flex-1">
+                                                    <p className="font-medium">{edition.file_name}</p>
+                                                    <p className="text-gray-500 text-xs">
+                                                        Edition {edition.edition_number} • {new Date(edition.upload_date).toLocaleDateString()}
+                                                    </p>
+                                                    {edition.notes && (
+                                                        <p className="text-gray-600 text-xs mt-1">{edition.notes}</p>
+                                                    )}
+                                                </div>
+                                                <button 
+                                                    onClick={() => onDownload(edition.file_path, edition.file_name)}
+                                                    className="text-blue-600 hover:text-blue-800 ml-2"
+                                                >
+                                                    <i className="fas fa-download"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <p className="text-gray-500 text-sm">No editions available</p>
+                            )}
+                        </div>
+                    )}
+
+                    {showAddEdition && isAdmin && (
+                        <AddEditionModal
+                            reportId={report.id}
+                            reportName={report.name}
+                            user={user}
+                            onClose={() => setShowAddEdition(false)}
+                            onSuccess={() => {
+                                setShowAddEdition(false);
+                                onUpdate();
+                            }}
+                        />
+                    )}
+                </div>
+            );
+        }
+
+        function AddReportModal({ user, onClose, onSuccess }) {
+            const [formData, setFormData] = useState({
+                name: '',
+                description: '',
+                frequency: ''
+            });
+            const [loading, setLoading] = useState(false);
+
+            const frequencies = ['Daily', 'Weekly', 'Monthly', 'Quarterly', 'Annual', 'Ad-hoc'];
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+
+                try {
+                    const { error } = await supabase
+                        .from('procurement_reports')
+                        .insert([{
+                            name: formData.name,
+                            description: formData.description,
+                            frequency: formData.frequency,
+                            created_by: user.id,
+                            created_date: new Date().toISOString()
+                        }]);
+
+                    if (error) throw error;
+                    onSuccess();
+                } catch (error) {
+                    console.error('Error adding report:', error);
+                    alert('Error adding report. Please try again.');
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-semibold">Add New Report</h3>
+                            <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
+                                <i className="fas fa-times"></i>
+                            </button>
+                        </div>
+
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Report Name
+                                </label>
+                                <input
+                                    type="text"
+                                    required
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    value={formData.name}
+                                    onChange={(e) => setFormData({...formData, name: e.target.value})}
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Description
+                                </label>
+                                <textarea
+                                    required
+                                    rows="3"
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    value={formData.description}
+                                    onChange={(e) => setFormData({...formData, description: e.target.value})}
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Frequency
+                                </label>
+                                <select
+                                    required
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    value={formData.frequency}
+                                    onChange={(e) => setFormData({...formData, frequency: e.target.value})}
+                                >
+                                    <option value="">Select frequency</option>
+                                    {frequencies.map(freq => (
+                                        <option key={freq} value={freq}>{freq}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div className="flex gap-2 pt-4">
+                                <button
+                                    type="button"
+                                    onClick={onClose}
+                                    className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={loading}
+                                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                                >
+                                    {loading ? 'Adding...' : 'Add Report'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            );
+        }
+
+        function AddEditionModal({ reportId, reportName, user, onClose, onSuccess }) {
+            const [formData, setFormData] = useState({
+                file: null,
+                notes: ''
+            });
+            const [loading, setLoading] = useState(false);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                if (!formData.file) return;
+
+                setLoading(true);
+
+                try {
+                    // Get current edition count
+                    const { data: existingEditions } = await supabase
+                        .from('report_editions')
+                        .select('edition_number')
+                        .eq('report_id', reportId)
+                        .order('edition_number', { ascending: false })
+                        .limit(1);
+
+                    const nextEditionNumber = existingEditions?.length > 0 ? existingEditions[0].edition_number + 1 : 1;
+
+                    // Upload file to Supabase Storage
+                    const fileName = `${reportId}_edition_${nextEditionNumber}_${formData.file.name}`;
+                    const { error: uploadError } = await supabase.storage
+                        .from('report-files')
+                        .upload(fileName, formData.file);
+
+                    if (uploadError) throw uploadError;
+
+                    // Insert edition record
+                    const { error } = await supabase
+                        .from('report_editions')
+                        .insert([{
+                            report_id: reportId,
+                            edition_number: nextEditionNumber,
+                            file_name: formData.file.name,
+                            file_path: fileName,
+                            file_size: formData.file.size,
+                            notes: formData.notes,
+                            uploaded_by: user.id,
+                            upload_date: new Date().toISOString()
+                        }]);
+
+                    if (error) throw error;
+                    onSuccess();
+                } catch (error) {
+                    console.error('Error adding edition:', error);
+                    alert('Error adding edition. Please try again.');
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-semibold">Add Edition</h3>
+                            <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
+                                <i className="fas fa-times"></i>
+                            </button>
+                        </div>
+
+                        <p className="text-gray-600 mb-4">Adding edition for: <strong>{reportName}</strong></p>
+
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Select File
+                                </label>
+                                <input
+                                    type="file"
+                                    required
+                                    accept=".pdf,.xlsx,.xls,.docx,.doc"
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    onChange={(e) => setFormData({...formData, file: e.target.files[0]})}
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Notes (Optional)
+                                </label>
+                                <textarea
+                                    rows="2"
+                                    placeholder="Any notes about this edition..."
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    value={formData.notes}
+                                    onChange={(e) => setFormData({...formData, notes: e.target.value})}
+                                />
+                            </div>
+
+                            <div className="flex gap-2 pt-4">
+                                <button
+                                    type="button"
+                                    onClick={onClose}
+                                    className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={loading || !formData.file}
+                                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                                >
+                                    {loading ? 'Uploading...' : 'Add Edition'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            );
+        }
+
+        function UserManagementModal({ onClose }) {
+            const [users, setUsers] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [showAddUser, setShowAddUser] = useState(false);
+
+            useEffect(() => {
+                fetchUsers();
+            }, []);
+
+            const fetchUsers = async () => {
+                try {
+                    const { data, error } = await supabase
+                        .from('app_users')
+                        .select('*')
+                        .order('created_at', { ascending: false });
+
+                    if (error) throw error;
+                    setUsers(data || []);
+                } catch (error) {
+                    console.error('Error fetching users:', error);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const toggleUserStatus = async (userId, currentStatus) => {
+                try {
+                    const { error } = await supabase
+                        .from('app_users')
+                        .update({ is_active: !currentStatus })
+                        .eq('id', userId);
+
+                    if (error) throw error;
+                    fetchUsers();
+                } catch (error) {
+                    console.error('Error updating user status:', error);
+                    alert('Error updating user status');
+                }
+            };
+
+            const updateUserRole = async (userId, newRole) => {
+                try {
+                    const { error } = await supabase
+                        .from('app_users')
+                        .update({ role: newRole })
+                        .eq('id', userId);
+
+                    if (error) throw error;
+                    fetchUsers();
+                } catch (error) {
+                    console.error('Error updating user role:', error);
+                    alert('Error updating user role');
+                }
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-lg p-6 w-full max-w-4xl mx-4 max-h-[80vh] overflow-hidden">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-xl font-semibold">User Management</h3>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => setShowAddUser(true)}
+                                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm"
+                                >
+                                    <i className="fas fa-plus mr-2"></i>Add User
+                                </button>
+                                <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
+                                    <i className="fas fa-times"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="overflow-y-auto max-h-96">
+                            {loading ? (
+                                <div className="text-center py-8">
+                                    <i className="fas fa-spinner fa-spin text-2xl text-blue-500"></i>
+                                </div>
+                            ) : (
+                                <div className="space-y-3">
+                                    {users.map(user => (
+                                        <div key={user.id} className="bg-gray-50 p-4 rounded-lg">
+                                            <div className="flex justify-between items-center">
+                                                <div>
+                                                    <h4 className="font-medium">{user.full_name}</h4>
+                                                    <p className="text-sm text-gray-600">{user.email}</p>
+                                                    <p className="text-xs text-gray-500">
+                                                        {user.auth_provider} • Created {new Date(user.created_at).toLocaleDateString()}
+                                                    </p>
+                                                </div>
+                                                <div className="flex items-center gap-3">
+                                                    <select
+                                                        value={user.role}
+                                                        onChange={(e) => updateUserRole(user.id, e.target.value)}
+                                                        className="text-sm px-2 py-1 border border-gray-300 rounded"
+                                                    >
+                                                        <option value="Admin">Admin</option>
+                                                        <option value="Viewer">Viewer</option>
+                                                    </select>
+                                                    <button
+                                                        onClick={() => toggleUserStatus(user.id, user.is_active)}
+                                                        className={`px-3 py-1 rounded text-sm ${
+                                                            user.is_active 
+                                                                ? 'bg-green-100 text-green-800 hover:bg-green-200' 
+                                                                : 'bg-red-100 text-red-800 hover:bg-red-200'
+                                                        }`}
+                                                    >
+                                                        {user.is_active ? 'Active' : 'Inactive'}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        {showAddUser && (
+                            <AddUserModal
+                                onClose={() => setShowAddUser(false)}
+                                onSuccess={() => {
+                                    setShowAddUser(false);
+                                    fetchUsers();
+                                }}
+                            />
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        function AddUserModal({ onClose, onSuccess }) {
+            const [formData, setFormData] = useState({
+                email: '',
+                full_name: '',
+                role: 'Viewer',
+                password: ''
+            });
+            const [loading, setLoading] = useState(false);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+
+                try {
+                    const { error } = await supabase
+                        .from('app_users')
+                        .insert([{
+                            email: formData.email,
+                            full_name: formData.full_name,
+                            role: formData.role,
+                            auth_provider: 'manual',
+                            password_hash: formData.password, // In production, hash this properly
+                            is_active: true
+                        }]);
+
+                    if (error) throw error;
+                    onSuccess();
+                } catch (error) {
+                    console.error('Error adding user:', error);
+                    alert('Error adding user. Please check if email already exists.');
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-semibold">Add Manual User</h3>
+                            <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
+                                <i className="fas fa-times"></i>
+                            </button>
+                        </div>
+
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Email
+                                </label>
+                                <input
+                                    type="email"
+                                    required
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    value={formData.email}
+                                    onChange={(e) => setFormData({...formData, email: e.target.value})}
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Full Name
+                                </label>
+                                <input
+                                    type="text"
+                                    required
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    value={formData.full_name}
+                                    onChange={(e) => setFormData({...formData, full_name: e.target.value})}
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Role
+                                </label>
+                                <select
+                                    required
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    value={formData.role}
+                                    onChange={(e) => setFormData({...formData, role: e.target.value})}
+                                >
+                                    <option value="Viewer">Viewer</option>
+                                    <option value="Admin">Admin</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Password
+                                </label>
+                                <input
+                                    type="password"
+                                    required
+                                    minLength="6"
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    value={formData.password}
+                                    onChange={(e) => setFormData({...formData, password: e.target.value})}
+                                />
+                            </div>
+
+                            <div className="flex gap-2 pt-4">
+                                <button
+                                    type="button"
+                                    onClick={onClose}
+                                    className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={loading}
+                                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                                >
+                                    {loading ? 'Adding...' : 'Add User'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
