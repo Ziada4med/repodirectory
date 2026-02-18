@@ -475,6 +475,7 @@
                             setReports([]);
                         } else {
                             console.log('✅ Reports fetched successfully (Admin - All reports):', data);
+                            console.log('🔗 Report links in fetched data:', data.map(r => ({ name: r.name, link: r.report_link })));
                             setReports(data || []);
                         }
                     } else {
@@ -1254,8 +1255,13 @@
                         }
                     } else if (formData.report_link !== currentReportLink) {
                         // Only link was updated, no file
+                        console.log('✅ Report link updated successfully');
                         alert('Report link updated successfully!');
-                        onSuccess();
+                        // Small delay to ensure database propagation before refreshing
+                        setTimeout(() => {
+                            console.log('🔄 Triggering onSuccess callback to refresh reports...');
+                            onSuccess();
+                        }, 500);
                         return;
                     } else {
                         alert('Please select a file to upload or update the report link.');
