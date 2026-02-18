@@ -403,6 +403,7 @@
         function Dashboard({ user, onSignOut }) {
             const [reports, setReports] = useState([]);
             const [filteredReports, setFilteredReports] = useState([]);
+            const [groupedReports, setGroupedReports] = useState({});
             const [searchTerm, setSearchTerm] = useState('');
             const [selectedFrequency, setSelectedFrequency] = useState('');
             const [loading, setLoading] = useState(true);
@@ -416,8 +417,45 @@
             }, []);
 
             useEffect(() => {
-                filterReports();
+                if (isAdmin) {
+                    filterReports();
+                } else {
+                    groupReportsByDate();
+                }
             }, [searchTerm, selectedFrequency, reports]);
+
+            const groupReportsByDate = () => {
+                let filtered = reports;
+
+                if (searchTerm) {
+                    filtered = filtered.filter(report =>
+                        report.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                        report.description.toLowerCase().includes(searchTerm.toLowerCase())
+                    );
+                }
+
+                if (selectedFrequency) {
+                    filtered = filtered.filter(report => report.frequency === selectedFrequency);
+                }
+
+                // Group by year and month
+                const grouped = {};
+                filtered.forEach(report => {
+                    const date = new Date(report.created_date);
+                    const year = date.getFullYear();
+                    const month = date.toLocaleDateString('en-US', { month: 'long' });
+                    
+                    if (!grouped[year]) {
+                        grouped[year] = {};
+                    }
+                    if (!grouped[year][month]) {
+                        grouped[year][month] = [];
+                    }
+                    grouped[year][month].push(report);
+                });
+
+                setGroupedReports(grouped);
+            };
 
             const fetchReports = async () => {
                 try {
@@ -644,27 +682,95 @@
                             </div>
                         </div>
 
-                        {/* Reports Grid */}
-                        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-                            {filteredReports.map(report => (
-                                <ReportCard 
-                                    key={report.id} 
-                                    report={report} 
-                                    user={user}
-                                    onUpdate={fetchReports}
-                                    onDownload={downloadFile}
-                                />
-                            ))}
-                        </div>
+                        {/* Reports Display */}
+                        {isAdmin ? (
+                            // Admin View - Regular Grid Layout
+                            <>
+                                <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+                                    {filteredReports.map(report => (
+                                        <ReportCard 
+                                            key={report.id} 
+                                            report={report} 
+                                            user={user}
+                                            onUpdate={fetchReports}
+                                            onDownload={downloadFile}
+                                        />
+                                    ))}
+                                </div>
 
-                        {filteredReports.length === 0 && (
-                            <div className="text-center py-12">
-                                <i className="fas fa-search text-6xl text-gray-300 mb-4"></i>
-                                <h3 className="text-lg font-medium text-gray-900 mb-2">No reports found</h3>
-                                <p className="text-gray-500">
-                                    {isAdmin ? 'Try adjusting your search criteria or add a new report.' : 'Try adjusting your search criteria.'}
-                                </p>
-                            </div>
+                                {filteredReports.length === 0 && (
+                                    <div className="text-center py-12">
+                                        <i className="fas fa-search text-6xl text-gray-300 mb-4"></i>
+                                        <h3 className="text-lg font-medium text-gray-900 mb-2">No reports found</h3>
+                                        <p className="text-gray-500">
+                                            Try adjusting your search criteria or add a new report.
+                                        </p>
+                                    </div>
+                                )}
+                            </>
+                        ) : (
+                            // Viewer View - Grouped by Year/Month
+                            <>
+                                {Object.keys(groupedReports).length === 0 ? (
+                                    <div className="text-center py-12">
+                                        <i className="fas fa-search text-6xl text-gray-300 mb-4"></i>
+                                        <h3 className="text-lg font-medium text-gray-900 mb-2">No reports found</h3>
+                                        <p className="text-gray-500">
+                                            {searchTerm || selectedFrequency 
+                                                ? "Try adjusting your search criteria." 
+                                                : "You don't have access to any reports yet. Contact your administrator."
+                                            }
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-8">
+                                        {Object.keys(groupedReports).sort((a, b) => b - a).map(year => (
+                                            <div key={year} className="bg-white rounded-lg shadow-sm overflow-hidden">
+                                                <div className="bg-gray-50 px-6 py-4 border-b">
+                                                    <h2 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
+                                                        <i className="fas fa-calendar-alt text-blue-600"></i>
+                                                        {year}
+                                                    </h2>
+                                                </div>
+                                                
+                                                {Object.keys(groupedReports[year]).sort((a, b) => {
+                                                    const months = ['January', 'February', 'March', 'April', 'May', 'June', 
+                                                                   'July', 'August', 'September', 'October', 'November', 'December'];
+                                                    return months.indexOf(b) - months.indexOf(a);
+                                                }).map(month => (
+                                                    <div key={month} className="border-b last:border-b-0">
+                                                        <div className="px-6 py-3 bg-blue-50">
+                                                            <h3 className="text-lg font-medium text-blue-900 flex items-center justify-between">
+                                                                <span className="flex items-center gap-2">
+                                                                    <i className="fas fa-folder text-blue-600"></i>
+                                                                    {month}
+                                                                </span>
+                                                                <span className="text-sm bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
+                                                                    {groupedReports[year][month].length} reports
+                                                                </span>
+                                                            </h3>
+                                                        </div>
+                                                        <div className="p-6">
+                                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                                                {groupedReports[year][month].map(report => (
+                                                                    <ReportCard 
+                                                                        key={report.id} 
+                                                                        report={report} 
+                                                                        user={user}
+                                                                        onUpdate={fetchReports}
+                                                                        onDownload={downloadFile}
+                                                                        compact={true}
+                                                                    />
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </>
                         )}
                     </main>
 
@@ -689,7 +795,7 @@
             );
         }
 
-        function ReportCard({ report, user, onUpdate, onDownload }) {
+        function ReportCard({ report, user, onUpdate, onDownload, compact = false }) {
             const [showEditions, setShowEditions] = useState(false);
             const [showAddEdition, setShowAddEdition] = useState(false);
 
@@ -726,6 +832,20 @@
                         <p className="text-gray-600 text-sm mb-4">
                             {report.description}
                         </p>
+
+                        {report.report_link && (
+                            <div className="mb-4">
+                                <a
+                                    href={report.report_link}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-2 text-blue-600 hover:text-blue-800 text-sm font-medium"
+                                >
+                                    <i className="fas fa-external-link-alt"></i>
+                                    View Report Link
+                                </a>
+                            </div>
+                        )}
 
                         <div className="space-y-2 mb-4">
                             <div className="flex justify-between text-sm">
@@ -816,11 +936,42 @@
             const [formData, setFormData] = useState({
                 name: '',
                 description: '',
-                frequency: ''
+                frequency: '',
+                report_link: '',
+                attachment_file: null
             });
             const [loading, setLoading] = useState(false);
 
             const frequencies = ['Daily', 'Weekly', 'Monthly', 'Quarterly', 'Annual', 'Ad-hoc'];
+
+            const handleFileChange = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    if (file.size > 10 * 1024 * 1024) {
+                        alert('File size must be less than 10MB');
+                        e.target.value = '';
+                        return;
+                    }
+                    setFormData({...formData, attachment_file: file});
+                }
+            };
+
+            const uploadFile = async (file, reportId) => {
+                try {
+                    const fileExt = file.name.split('.').pop();
+                    const fileName = `${reportId}/v1_${Date.now()}.${fileExt}`;
+                    
+                    const { data, error } = await supabase.storage
+                        .from('report-files')
+                        .upload(fileName, file);
+
+                    if (error) throw error;
+                    return data.path;
+                } catch (error) {
+                    console.error('File upload error:', error);
+                    throw error;
+                }
+            };
 
             const handleSubmit = async (e) => {
                 e.preventDefault();
@@ -829,34 +980,64 @@
                 try {
                     console.log('🔄 Attempting to add report...');
                     
-                    const { error } = await supabase
+                    // Insert the report first
+                    const { data: reportData, error: reportError } = await supabase
                         .from('procurement_reports')
                         .insert([{
                             name: formData.name,
                             description: formData.description,
                             frequency: formData.frequency,
+                            report_link: formData.report_link || null,
                             created_by: user.id,
                             created_date: new Date().toISOString()
-                        }]);
+                        }])
+                        .select()
+                        .single();
 
-                    if (error) {
-                        console.error('❌ INSERT ERROR:', error);
-                        console.error('Error message:', error.message);
-                        console.error('Error code:', error.code);
-                        console.error('Error details:', error.details);
-                        console.error('Error hint:', error.hint);
+                    if (reportError) {
+                        console.error('❌ INSERT ERROR:', reportError);
+                        console.error('Error message:', reportError.message);
+                        console.error('Error code:', reportError.code);
+                        console.error('Error details:', reportError.details);
+                        console.error('Error hint:', reportError.hint);
                         
-                        // Check if it's an RLS policy issue
-                        if (error.code === '42501' || error.message?.includes('policy')) {
-                            alert(`Database Permission Error: ${error.message}\n\nThis is likely an RLS (Row Level Security) policy issue. Please check your Supabase table permissions.`);
+                        if (reportError.code === '42501' || reportError.message?.includes('policy')) {
+                            alert(`Database Permission Error: ${reportError.message}\n\nThis is likely an RLS (Row Level Security) policy issue. Please check your Supabase table permissions.`);
                         } else {
-                            alert(`Database Error: ${error.message}\n\nError Code: ${error.code}`);
+                            alert(`Database Error: ${reportError.message}\n\nError Code: ${reportError.code}`);
                         }
-                    } else {
-                        console.log('✅ Report added successfully');
-                        alert(`Report "${formData.name}" added successfully!`);
+                        return;
                     }
-                    
+
+                    // Upload file if provided
+                    if (formData.attachment_file) {
+                        try {
+                            const filePath = await uploadFile(formData.attachment_file, reportData.id);
+                            
+                            // Create report edition entry
+                            const { error: editionError } = await supabase
+                                .from('report_editions')
+                                .insert([{
+                                    report_id: reportData.id,
+                                    edition_number: 1,
+                                    file_name: formData.attachment_file.name,
+                                    file_path: filePath,
+                                    file_size: formData.attachment_file.size,
+                                    notes: 'Initial upload',
+                                    uploaded_by: user.id
+                                }]);
+
+                            if (editionError) {
+                                console.error('Error creating edition:', editionError);
+                            }
+                        } catch (fileError) {
+                            console.error('File upload failed:', fileError);
+                            alert(`Report created successfully, but file upload failed: ${fileError.message}`);
+                        }
+                    }
+
+                    console.log('✅ Report added successfully');
+                    alert(`Report "${formData.name}" added successfully!${formData.attachment_file ? ' File uploaded as version 1.' : ''}`);
                     onSuccess();
                 } catch (error) {
                     console.error('Error adding report:', error);
@@ -919,6 +1100,37 @@
                                         <option key={freq} value={freq}>{freq}</option>
                                     ))}
                                 </select>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Report Link (Optional)
+                                </label>
+                                <input
+                                    type="url"
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    value={formData.report_link}
+                                    onChange={(e) => setFormData({...formData, report_link: e.target.value})}
+                                    placeholder="https://example.com/report-dashboard"
+                                />
+                                <p className="text-xs text-gray-500 mt-1">
+                                    External link to the report (dashboard, web page, etc.)
+                                </p>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Upload File (Optional)
+                                </label>
+                                <input
+                                    type="file"
+                                    accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv"
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    onChange={handleFileChange}
+                                />
+                                <p className="text-xs text-gray-500 mt-1">
+                                    Supported: PDF, Word, Excel, PowerPoint, Text, CSV (Max 10MB)
+                                </p>
                             </div>
 
                             <div className="flex gap-2 pt-4">
