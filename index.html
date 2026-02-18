@@ -263,25 +263,7 @@
                 }
             };
 
-            const initializeAuth = async () => {
-                try {
-                    // Test Supabase connection first
-                    const connectionOk = await testSupabaseConnection();
-                    if (!connectionOk) {
-                        setAuthError('Supabase connection failed. Please check your API key.');
-                        setLoading(false);
-                        return;
-                    }
 
-                    console.log('Getting session...');
-                    const { data: { session }, error } = await supabase.auth.getSession();
-                    console.log('Session result:', session?.user?.email, error?.message);
-                    setLoading(false);
-                } catch (error) {
-                    console.error('Auth initialization error:', error);
-                    setLoading(false);
-                }
-            };
 
             const signInWithGoogle = async () => {
                 try {
