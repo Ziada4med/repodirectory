@@ -495,6 +495,8 @@
                                 </div>
 
                                 <div className="flex items-center gap-3">
+                                    {/* DEBUG: Log admin status */}
+                                    {console.log('🔍 DEBUG - User role:', user.role, 'isAdmin:', isAdmin)}
                                     {isAdmin && (
                                         <>
                                             <button
@@ -513,6 +515,15 @@
                                             </button>
                                         </>
                                     )}
+                                    {/* DEBUG: Show buttons for all users temporarily */}
+                                    <button
+                                        onClick={() => setShowUserManagement(true)}
+                                        className="bg-red-100 hover:bg-red-200 text-red-700 px-4 py-2 rounded-lg flex items-center gap-2 transition-colors"
+                                        style={{border: '2px solid red'}}
+                                    >
+                                        <i className="fas fa-users"></i>
+                                        DEBUG USERS (Always Show)
+                                    </button>
                                     <button
                                         onClick={onSignOut}
                                         className="text-gray-500 hover:text-gray-700 px-3 py-2"
