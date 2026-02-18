@@ -475,7 +475,8 @@
                             setReports([]);
                         } else {
                             console.log('✅ Reports fetched successfully (Admin - All reports):', data);
-                            console.log('🔗 Report links in fetched data:', data.map(r => ({ name: r.name, link: r.report_link })));
+                            console.log('🔗 Report links in fetched data:');
+                            data.forEach(r => console.log(`   - ${r.name}: ${r.report_link || 'NO LINK'}`));
                             setReports(data || []);
                         }
                     } else {
@@ -902,7 +903,7 @@
                     )}
 
                     {showAddEdition && isAdmin && (
-                        <AddEditionModal
+                        <VersionManagementModal
                             reportId={report.id}
                             reportName={report.name}
                             user={user}
@@ -1140,38 +1141,66 @@
             );
         }
 
-        function AddEditionModal({ reportId, reportName, user, onClose, onSuccess }) {
+        function VersionManagementModal({ reportId, reportName, user, onClose, onSuccess }) {
+            const [mode, setMode] = useState(''); // 'new', 'update-current', 'update-previous'
+            const [selectedVersion, setSelectedVersion] = useState(null);
+            const [versions, setVersions] = useState([]);
             const [formData, setFormData] = useState({
                 file: null,
                 notes: '',
-                report_link: ''
+                version_link: ''
             });
+            const [reportLink, setReportLink] = useState('');
             const [loading, setLoading] = useState(false);
-            const [currentReportLink, setCurrentReportLink] = useState('');
 
-            // Fetch current report data to populate existing link
             useEffect(() => {
-                fetchCurrentReportData();
+                fetchVersionsAndReportData();
             }, []);
 
-            const fetchCurrentReportData = async () => {
+            const fetchVersionsAndReportData = async () => {
                 try {
-                    const { data, error } = await supabase
+                    // Fetch report data for main report link
+                    const { data: reportData } = await supabase
                         .from('procurement_reports')
                         .select('report_link')
                         .eq('id', reportId)
                         .single();
+                    
+                    setReportLink(reportData?.report_link || '');
 
-                    if (error) {
-                        console.error('Error fetching report data:', error);
-                    } else {
-                        const currentLink = data.report_link || '';
-                        setCurrentReportLink(currentLink);
-                        setFormData(prev => ({ ...prev, report_link: currentLink }));
-                    }
+                    // Fetch all versions/editions
+                    const { data: versionsData } = await supabase
+                        .from('report_editions')
+                        .select('*')
+                        .eq('report_id', reportId)
+                        .order('edition_number', { ascending: false });
+
+                    setVersions(versionsData || []);
                 } catch (error) {
-                    console.error('Error in fetchCurrentReportData:', error);
+                    console.error('Error fetching versions:', error);
                 }
+            };
+
+            const handleModeSelect = (selectedMode) => {
+                setMode(selectedMode);
+                if (selectedMode === 'update-current' && versions.length > 0) {
+                    const currentVersion = versions[0]; // Latest version
+                    setSelectedVersion(currentVersion);
+                    setFormData({
+                        file: null,
+                        notes: currentVersion.notes || '',
+                        version_link: currentVersion.version_link || ''
+                    });
+                }
+            };
+
+            const handleVersionSelect = (version) => {
+                setSelectedVersion(version);
+                setFormData({
+                    file: null,
+                    notes: version.notes || '',
+                    version_link: version.version_link || ''
+                });
             };
 
             const handleSubmit = async (e) => {
@@ -1179,94 +1208,11 @@
                 setLoading(true);
 
                 try {
-                    console.log('🔄 Adding edition and updating report...');
-                    
-                    // Update report link if it has changed
-                    if (formData.report_link !== currentReportLink) {
-                        console.log('🔗 Updating report link...');
-                        const { error: linkError } = await supabase
-                            .from('procurement_reports')
-                            .update({ 
-                                report_link: formData.report_link || null,
-                                updated_date: new Date().toISOString(),
-                                updated_by: user.id
-                            })
-                            .eq('id', reportId);
-
-                        if (linkError) {
-                            console.error('Error updating report link:', linkError);
-                            console.error('Error details:', JSON.stringify(linkError, null, 2));
-                            alert(`Error updating report link: ${linkError.message || linkError.error_description || 'Unknown error'}\n\nDetails: ${JSON.stringify(linkError)}`);
-                        } else {
-                            console.log('✅ Report link updated successfully');
-                        }
+                    if (mode === 'new') {
+                        await createNewVersion();
+                    } else if (mode === 'update-current' || mode === 'update-previous') {
+                        await updateExistingVersion();
                     }
-
-                    // Handle file upload if provided
-                    if (formData.file) {
-                        console.log('📁 Uploading file...');
-                        
-                        // Get the next edition number
-                        const { data: editionsData, error: editionsError } = await supabase
-                            .from('report_editions')
-                            .select('edition_number')
-                            .eq('report_id', reportId)
-                            .order('edition_number', { ascending: false })
-                            .limit(1);
-
-                        const nextEditionNumber = editionsData && editionsData.length > 0 
-                            ? editionsData[0].edition_number + 1 
-                            : 1;
-
-                        // Upload file to storage
-                        const fileExt = formData.file.name.split('.').pop();
-                        const fileName = `${reportId}/v${nextEditionNumber}_${Date.now()}.${fileExt}`;
-                        
-                        const { data: uploadData, error: uploadError } = await supabase.storage
-                            .from('report-files')
-                            .upload(fileName, formData.file);
-
-                        if (uploadError) {
-                            console.error('File upload error:', uploadError);
-                            alert(`File upload failed: ${uploadError.message}`);
-                        } else {
-                            // Create edition record
-                            const { error: editionError } = await supabase
-                                .from('report_editions')
-                                .insert([{
-                                    report_id: reportId,
-                                    edition_number: nextEditionNumber,
-                                    file_name: formData.file.name,
-                                    file_path: uploadData.path,
-                                    file_size: formData.file.size,
-                                    notes: formData.notes,
-                                    uploaded_by: user.id
-                                }]);
-
-                            if (editionError) {
-                                console.error('Error creating edition record:', editionError);
-                                alert(`Error creating edition: ${editionError.message}`);
-                            } else {
-                                console.log('✅ Edition created successfully');
-                                alert(`Edition ${nextEditionNumber} "${formData.file.name}" added successfully!${formData.report_link !== currentReportLink ? ' Report link also updated.' : ''}`);
-                                onSuccess();
-                                return;
-                            }
-                        }
-                    } else if (formData.report_link !== currentReportLink) {
-                        // Only link was updated, no file
-                        console.log('✅ Report link updated successfully');
-                        alert('Report link updated successfully!');
-                        // Small delay to ensure database propagation before refreshing
-                        setTimeout(() => {
-                            console.log('🔄 Triggering onSuccess callback to refresh reports...');
-                            onSuccess();
-                        }, 500);
-                        return;
-                    } else {
-                        alert('Please select a file to upload or update the report link.');
-                    }
-                    
                 } catch (error) {
                     console.error('Error in handleSubmit:', error);
                     alert(`Error: ${error.message}`);
@@ -1275,82 +1221,277 @@
                 }
             };
 
+            const createNewVersion = async () => {
+                const nextVersionNumber = versions.length > 0 ? Math.max(...versions.map(v => v.edition_number)) + 1 : 1;
+                
+                let filePath = null;
+                if (formData.file) {
+                    const fileExt = formData.file.name.split('.').pop();
+                    const fileName = `${reportId}/v${nextVersionNumber}_${Date.now()}.${fileExt}`;
+                    
+                    const { data: uploadData, error: uploadError } = await supabase.storage
+                        .from('report-files')
+                        .upload(fileName, formData.file);
+
+                    if (uploadError) throw uploadError;
+                    filePath = uploadData.path;
+                }
+
+                const { error } = await supabase
+                    .from('report_editions')
+                    .insert([{
+                        report_id: reportId,
+                        edition_number: nextVersionNumber,
+                        file_name: formData.file?.name || null,
+                        file_path: filePath,
+                        file_size: formData.file?.size || null,
+                        notes: formData.notes,
+                        version_link: formData.version_link || null,
+                        uploaded_by: user.id
+                    }]);
+
+                if (error) throw error;
+                
+                alert(`Version ${nextVersionNumber} created successfully!`);
+                onSuccess();
+            };
+
+            const updateExistingVersion = async () => {
+                if (!selectedVersion) return;
+
+                let filePath = selectedVersion.file_path;
+                
+                // Upload new file if provided
+                if (formData.file) {
+                    // Delete old file if it exists
+                    if (selectedVersion.file_path) {
+                        await supabase.storage
+                            .from('report-files')
+                            .remove([selectedVersion.file_path]);
+                    }
+
+                    // Upload new file
+                    const fileExt = formData.file.name.split('.').pop();
+                    const fileName = `${reportId}/v${selectedVersion.edition_number}_${Date.now()}.${fileExt}`;
+                    
+                    const { data: uploadData, error: uploadError } = await supabase.storage
+                        .from('report-files')
+                        .upload(fileName, formData.file);
+
+                    if (uploadError) throw uploadError;
+                    filePath = uploadData.path;
+                }
+
+                const { error } = await supabase
+                    .from('report_editions')
+                    .update({
+                        file_name: formData.file?.name || selectedVersion.file_name,
+                        file_path: filePath,
+                        file_size: formData.file?.size || selectedVersion.file_size,
+                        notes: formData.notes,
+                        version_link: formData.version_link || null,
+                        upload_date: formData.file ? new Date().toISOString() : selectedVersion.upload_date
+                    })
+                    .eq('id', selectedVersion.id);
+
+                if (error) throw error;
+
+                alert(`Version ${selectedVersion.edition_number} updated successfully!`);
+                onSuccess();
+            };
+
             return (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                    <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
+                    <div className="bg-white rounded-lg p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
                         <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-semibold">Update Report</h3>
+                            <h3 className="text-lg font-semibold">Manage Versions - {reportName}</h3>
                             <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
                                 <i className="fas fa-times"></i>
                             </button>
                         </div>
 
-                        <p className="text-gray-600 mb-4">
-                            Update link and/or add new version for: <strong>{reportName}</strong>
-                        </p>
-
-                        <form onSubmit={handleSubmit} className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                    Report Link (Optional)
-                                </label>
-                                <input
-                                    type="url"
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                    value={formData.report_link}
-                                    onChange={(e) => setFormData({...formData, report_link: e.target.value})}
-                                    placeholder="https://example.com/report-dashboard"
-                                />
-                                <p className="text-xs text-gray-500 mt-1">
-                                    External link to the report (dashboard, web page, etc.)
-                                </p>
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                    Upload New File (Optional)
-                                </label>
-                                <input
-                                    type="file"
-                                    accept=".pdf,.xlsx,.xls,.docx,.doc,.ppt,.pptx,.txt,.csv"
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                    onChange={(e) => setFormData({...formData, file: e.target.files[0]})}
-                                />
-                                <p className="text-xs text-gray-500 mt-1">
-                                    Upload a new file to create the next version
-                                </p>
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                    Notes (Optional)
-                                </label>
-                                <textarea
-                                    rows="2"
-                                    placeholder="Any notes about this edition..."
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                    value={formData.notes}
-                                    onChange={(e) => setFormData({...formData, notes: e.target.value})}
-                                />
-                            </div>
-
-                            <div className="flex gap-2 pt-4">
+                        {!mode ? (
+                            // Mode Selection
+                            <div className="space-y-4">
+                                <h4 className="font-medium text-gray-900">What would you like to do?</h4>
+                                
                                 <button
-                                    type="button"
-                                    onClick={onClose}
-                                    className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                                    onClick={() => handleModeSelect('new')}
+                                    className="w-full p-4 text-left border-2 border-blue-200 rounded-lg hover:border-blue-400 transition-colors"
                                 >
-                                    Cancel
+                                    <div className="flex items-center gap-3">
+                                        <i className="fas fa-plus-circle text-blue-600 text-xl"></i>
+                                        <div>
+                                            <div className="font-medium">Create New Version</div>
+                                            <div className="text-sm text-gray-600">Add a completely new version with new files/links</div>
+                                        </div>
+                                    </div>
                                 </button>
-                                <button
-                                    type="submit"
-                                    disabled={loading || (!formData.file && formData.report_link === currentReportLink)}
-                                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                                >
-                                    {loading ? 'Updating...' : 'Update Report'}
-                                </button>
+
+                                {versions.length > 0 && (
+                                    <button
+                                        onClick={() => handleModeSelect('update-current')}
+                                        className="w-full p-4 text-left border-2 border-green-200 rounded-lg hover:border-green-400 transition-colors"
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <i className="fas fa-edit text-green-600 text-xl"></i>
+                                            <div>
+                                                <div className="font-medium">Update Current Version (v{versions[0]?.edition_number})</div>
+                                                <div className="text-sm text-gray-600">Modify the latest version's files/links</div>
+                                            </div>
+                                        </div>
+                                    </button>
+                                )}
+
+                                {versions.length > 1 && (
+                                    <button
+                                        onClick={() => handleModeSelect('update-previous')}
+                                        className="w-full p-4 text-left border-2 border-orange-200 rounded-lg hover:border-orange-400 transition-colors"
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <i className="fas fa-history text-orange-600 text-xl"></i>
+                                            <div>
+                                                <div className="font-medium">Update Previous Version</div>
+                                                <div className="text-sm text-gray-600">Select and modify an older version</div>
+                                            </div>
+                                        </div>
+                                    </button>
+                                )}
+
+                                <div className="mt-6">
+                                    <h5 className="font-medium text-gray-900 mb-2">Current Versions:</h5>
+                                    <div className="space-y-2">
+                                        {versions.map(version => (
+                                            <div key={version.id} className="flex items-center justify-between p-2 bg-gray-50 rounded">
+                                                <div>
+                                                    <span className="font-medium">Version {version.edition_number}</span>
+                                                    {version.file_name && <span className="text-sm text-gray-600 ml-2">({version.file_name})</span>}
+                                                </div>
+                                                <div className="text-xs text-gray-500">
+                                                    {new Date(version.upload_date).toLocaleDateString()}
+                                                </div>
+                                            </div>
+                                        ))}
+                                        {versions.length === 0 && (
+                                            <div className="text-sm text-gray-500 italic">No versions yet</div>
+                                        )}
+                                    </div>
+                                </div>
                             </div>
-                        </form>
+                        ) : mode === 'update-previous' && !selectedVersion ? (
+                            // Version Selection for Previous Versions
+                            <div className="space-y-4">
+                                <div className="flex items-center gap-2 mb-4">
+                                    <button onClick={() => setMode('')} className="text-blue-600 hover:text-blue-800">
+                                        <i className="fas fa-arrow-left"></i>
+                                    </button>
+                                    <h4 className="font-medium text-gray-900">Select Version to Update</h4>
+                                </div>
+                                
+                                <div className="space-y-2">
+                                    {versions.filter(v => v.edition_number !== Math.max(...versions.map(x => x.edition_number))).map(version => (
+                                        <button
+                                            key={version.id}
+                                            onClick={() => handleVersionSelect(version)}
+                                            className="w-full p-3 text-left border-2 border-gray-200 rounded-lg hover:border-orange-400 transition-colors"
+                                        >
+                                            <div className="flex items-center justify-between">
+                                                <div>
+                                                    <div className="font-medium">Version {version.edition_number}</div>
+                                                    {version.file_name && <div className="text-sm text-gray-600">{version.file_name}</div>}
+                                                    {version.notes && <div className="text-sm text-gray-500">{version.notes}</div>}
+                                                </div>
+                                                <div className="text-xs text-gray-500">
+                                                    {new Date(version.upload_date).toLocaleDateString()}
+                                                </div>
+                                            </div>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        ) : (
+                            // Form for Create/Update
+                            <form onSubmit={handleSubmit} className="space-y-4">
+                                <div className="flex items-center gap-2 mb-4">
+                                    <button type="button" onClick={() => {setMode(''); setSelectedVersion(null);}} className="text-blue-600 hover:text-blue-800">
+                                        <i className="fas fa-arrow-left"></i>
+                                    </button>
+                                    <h4 className="font-medium text-gray-900">
+                                        {mode === 'new' ? 'Create New Version' : 
+                                         mode === 'update-current' ? `Update Current Version (v${selectedVersion?.edition_number})` :
+                                         `Update Version ${selectedVersion?.edition_number}`}
+                                    </h4>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                                        Version Link (Optional)
+                                    </label>
+                                    <input
+                                        type="url"
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                        value={formData.version_link}
+                                        onChange={(e) => setFormData({...formData, version_link: e.target.value})}
+                                        placeholder="https://example.com/version-specific-link"
+                                    />
+                                    <p className="text-xs text-gray-500 mt-1">
+                                        Link specific to this version
+                                    </p>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                                        {mode === 'new' ? 'Upload File (Optional)' : 'Replace File (Optional)'}
+                                    </label>
+                                    <input
+                                        type="file"
+                                        accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv"
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                        onChange={(e) => setFormData({...formData, file: e.target.files[0]})}
+                                    />
+                                    <p className="text-xs text-gray-500 mt-1">
+                                        {mode === 'new' ? 'Upload file for the new version' : 'Upload new file to replace the current one'}
+                                    </p>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                                        Notes (Optional)
+                                    </label>
+                                    <textarea
+                                        rows="3"
+                                        placeholder="Notes about this version..."
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                        value={formData.notes}
+                                        onChange={(e) => setFormData({...formData, notes: e.target.value})}
+                                    />
+                                </div>
+
+                                <div className="flex gap-3 pt-4">
+                                    <button
+                                        type="button"
+                                        onClick={() => {setMode(''); setSelectedVersion(null);}}
+                                        className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                                    >
+                                        Back
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        disabled={loading}
+                                        className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                                    >
+                                        {loading ? (
+                                            <>
+                                                <i className="fas fa-spinner fa-spin mr-2"></i>
+                                                {mode === 'new' ? 'Creating...' : 'Updating...'}
+                                            </>
+                                        ) : (
+                                            mode === 'new' ? 'Create Version' : 'Update Version'
+                                        )}
+                                    </button>
+                                </div>
+                            </form>
+                        )}
                     </div>
                 </div>
             );
