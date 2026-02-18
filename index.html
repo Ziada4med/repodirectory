@@ -59,9 +59,81 @@
                 console.log('App initializing...');
                 console.log('Current URL:', window.location.href);
                 
-                // Check if we have OAuth callback tokens in the URL hash
-                const hashParams = new URLSearchParams(window.location.hash.substring(1));
-                const accessToken = hashParams.get('access_token');
+                // First, check for existing session (session persistence)
+                initializeAuth();
+            }, []);
+
+            const initializeAuth = async () => {
+                try {
+                    // Check if we have OAuth callback tokens in the URL hash
+                    const hashParams = new URLSearchParams(window.location.hash.substring(1));
+                    const accessToken = hashParams.get('access_token');
+                    
+                    if (accessToken) {
+                        console.log('✅ Found access token in URL, processing OAuth callback...');
+                        await processOAuthCallback();
+                        return;
+                    }
+
+                    // No OAuth callback, check for existing session
+                    console.log('🔍 No OAuth callback, checking for existing session...');
+                    const { data: { session }, error } = await supabase.auth.getSession();
+                    
+                    if (error) {
+                        console.error('❌ Session check failed:', error);
+                        setLoading(false);
+                        return;
+                    }
+
+                    if (session && session.user) {
+                        console.log('✅ Found existing session:', session.user.email);
+                        
+                        // Look up user in database using existing session
+                        const { data: dbUserData, error: dbError } = await supabase
+                            .from('app_users')
+                            .select('*')
+                            .eq('email', session.user.email.toLowerCase())
+                            .eq('is_active', true)
+                            .single();
+                        
+                        if (dbError && dbError.code === 'PGRST116') {
+                            console.error('❌ User not found in database:', session.user.email);
+                            setAuthError(`Access Denied: Your account (${session.user.email}) is not registered in this system. Please contact administrator.`);
+                            await supabase.auth.signOut();
+                        } else if (dbError) {
+                            console.error('❌ Database error during session restore:', dbError);
+                            setAuthError(`Database Error: ${dbError.message}. Please try again later.`);
+                        } else if (!dbUserData.is_active) {
+                            console.error('❌ User account inactive:', session.user.email);
+                            setAuthError(`Access Denied: Your account has been deactivated. Please contact administrator.`);
+                            await supabase.auth.signOut();
+                        } else {
+                            // Valid user, restore session
+                            console.log('✅ Session restored successfully:', dbUserData.email, 'Role:', dbUserData.role);
+                            
+                            setUser(session.user);
+                            setCurrentUser({
+                                id: dbUserData.id,
+                                email: dbUserData.email,
+                                full_name: dbUserData.full_name,
+                                role: dbUserData.role,
+                                auth_provider: dbUserData.auth_provider || 'google',
+                                is_active: dbUserData.is_active,
+                                created_at: dbUserData.created_at
+                            });
+                        }
+                    } else {
+                        console.log('ℹ️ No existing session found, user needs to login');
+                    }
+                } catch (error) {
+                    console.error('💥 Auth initialization error:', error);
+                    setAuthError(`System Error: ${error.message}`);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const processOAuthCallback = async () => {
                 const refreshToken = hashParams.get('refresh_token');
                 
                 if (accessToken) {
