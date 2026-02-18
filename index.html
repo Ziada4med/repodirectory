@@ -1336,10 +1336,10 @@
                                 </button>
                                 <button
                                     type="submit"
-                                    disabled={loading || !formData.file}
+                                    disabled={loading || (!formData.file && formData.report_link === currentReportLink)}
                                     className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
                                 >
-                                    {loading ? 'Uploading...' : 'Add Edition'}
+                                    {loading ? 'Updating...' : 'Update Report'}
                                 </button>
                             </div>
                         </form>
