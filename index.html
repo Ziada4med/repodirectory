@@ -1142,25 +1142,126 @@
         function AddEditionModal({ reportId, reportName, user, onClose, onSuccess }) {
             const [formData, setFormData] = useState({
                 file: null,
-                notes: ''
+                notes: '',
+                report_link: ''
             });
             const [loading, setLoading] = useState(false);
+            const [currentReportLink, setCurrentReportLink] = useState('');
+
+            // Fetch current report data to populate existing link
+            useEffect(() => {
+                fetchCurrentReportData();
+            }, []);
+
+            const fetchCurrentReportData = async () => {
+                try {
+                    const { data, error } = await supabase
+                        .from('procurement_reports')
+                        .select('report_link')
+                        .eq('id', reportId)
+                        .single();
+
+                    if (error) {
+                        console.error('Error fetching report data:', error);
+                    } else {
+                        const currentLink = data.report_link || '';
+                        setCurrentReportLink(currentLink);
+                        setFormData(prev => ({ ...prev, report_link: currentLink }));
+                    }
+                } catch (error) {
+                    console.error('Error in fetchCurrentReportData:', error);
+                }
+            };
 
             const handleSubmit = async (e) => {
                 e.preventDefault();
-                if (!formData.file) return;
-
                 setLoading(true);
 
                 try {
-                    console.log('🔄 Adding edition to database...');
+                    console.log('🔄 Adding edition and updating report...');
                     
-                    // Simulate success
-                    alert(`Edition "${formData.file.name}" added successfully!`);
-                    onSuccess();
+                    // Update report link if it has changed
+                    if (formData.report_link !== currentReportLink) {
+                        console.log('🔗 Updating report link...');
+                        const { error: linkError } = await supabase
+                            .from('procurement_reports')
+                            .update({ 
+                                report_link: formData.report_link || null,
+                                updated_date: new Date().toISOString()
+                            })
+                            .eq('id', reportId);
+
+                        if (linkError) {
+                            console.error('Error updating report link:', linkError);
+                            alert(`Error updating report link: ${linkError.message}`);
+                        } else {
+                            console.log('✅ Report link updated successfully');
+                        }
+                    }
+
+                    // Handle file upload if provided
+                    if (formData.file) {
+                        console.log('📁 Uploading file...');
+                        
+                        // Get the next edition number
+                        const { data: editionsData, error: editionsError } = await supabase
+                            .from('report_editions')
+                            .select('edition_number')
+                            .eq('report_id', reportId)
+                            .order('edition_number', { ascending: false })
+                            .limit(1);
+
+                        const nextEditionNumber = editionsData && editionsData.length > 0 
+                            ? editionsData[0].edition_number + 1 
+                            : 1;
+
+                        // Upload file to storage
+                        const fileExt = formData.file.name.split('.').pop();
+                        const fileName = `${reportId}/v${nextEditionNumber}_${Date.now()}.${fileExt}`;
+                        
+                        const { data: uploadData, error: uploadError } = await supabase.storage
+                            .from('report-files')
+                            .upload(fileName, formData.file);
+
+                        if (uploadError) {
+                            console.error('File upload error:', uploadError);
+                            alert(`File upload failed: ${uploadError.message}`);
+                        } else {
+                            // Create edition record
+                            const { error: editionError } = await supabase
+                                .from('report_editions')
+                                .insert([{
+                                    report_id: reportId,
+                                    edition_number: nextEditionNumber,
+                                    file_name: formData.file.name,
+                                    file_path: uploadData.path,
+                                    file_size: formData.file.size,
+                                    notes: formData.notes,
+                                    uploaded_by: user.id
+                                }]);
+
+                            if (editionError) {
+                                console.error('Error creating edition record:', editionError);
+                                alert(`Error creating edition: ${editionError.message}`);
+                            } else {
+                                console.log('✅ Edition created successfully');
+                                alert(`Edition ${nextEditionNumber} "${formData.file.name}" added successfully!${formData.report_link !== currentReportLink ? ' Report link also updated.' : ''}`);
+                                onSuccess();
+                                return;
+                            }
+                        }
+                    } else if (formData.report_link !== currentReportLink) {
+                        // Only link was updated, no file
+                        alert('Report link updated successfully!');
+                        onSuccess();
+                        return;
+                    } else {
+                        alert('Please select a file to upload or update the report link.');
+                    }
+                    
                 } catch (error) {
-                    console.error('Error adding edition:', error);
-                    alert('Error adding edition. Please try again.');
+                    console.error('Error in handleSubmit:', error);
+                    alert(`Error: ${error.message}`);
                 } finally {
                     setLoading(false);
                 }
@@ -1170,26 +1271,46 @@
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
                     <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
                         <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-semibold">Add Edition</h3>
+                            <h3 className="text-lg font-semibold">Update Report</h3>
                             <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
                                 <i className="fas fa-times"></i>
                             </button>
                         </div>
 
-                        <p className="text-gray-600 mb-4">Adding edition for: <strong>{reportName}</strong></p>
+                        <p className="text-gray-600 mb-4">
+                            Update link and/or add new version for: <strong>{reportName}</strong>
+                        </p>
 
                         <form onSubmit={handleSubmit} className="space-y-4">
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                                    Select File
+                                    Report Link (Optional)
+                                </label>
+                                <input
+                                    type="url"
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    value={formData.report_link}
+                                    onChange={(e) => setFormData({...formData, report_link: e.target.value})}
+                                    placeholder="https://example.com/report-dashboard"
+                                />
+                                <p className="text-xs text-gray-500 mt-1">
+                                    External link to the report (dashboard, web page, etc.)
+                                </p>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Upload New File (Optional)
                                 </label>
                                 <input
                                     type="file"
-                                    required
-                                    accept=".pdf,.xlsx,.xls,.docx,.doc"
+                                    accept=".pdf,.xlsx,.xls,.docx,.doc,.ppt,.pptx,.txt,.csv"
                                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                     onChange={(e) => setFormData({...formData, file: e.target.files[0]})}
                                 />
+                                <p className="text-xs text-gray-500 mt-1">
+                                    Upload a new file to create the next version
+                                </p>
                             </div>
 
                             <div>
