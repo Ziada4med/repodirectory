@@ -1215,7 +1215,8 @@
                     }
                 } catch (error) {
                     console.error('Error in handleSubmit:', error);
-                    alert(`Error: ${error.message}`);
+                    console.error('Full error details:', JSON.stringify(error, null, 2));
+                    alert(`Error: ${error.message || error.error_description || 'Unknown error'}\n\nDetails: ${JSON.stringify(error)}`);
                 } finally {
                     setLoading(false);
                 }
