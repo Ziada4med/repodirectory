@@ -140,7 +140,7 @@
                 
                 if (accessToken) {
                     console.log('✅ Found access token in URL, processing OAuth callback...');
-                    processOAuthManually(accessToken, refreshToken);
+                    await processOAuthManually(accessToken, refreshToken);
                     return;
                 }
                 
@@ -157,8 +157,8 @@
                 }
                 
                 // No OAuth callback, proceed with normal initialization
-                initializeAuth();
-            }, []);
+                await initializeAuth();
+            };
 
             const processOAuthManually = async (accessToken, refreshToken) => {
                 try {
