@@ -1218,7 +1218,9 @@
             const [formData, setFormData] = useState({
                 file: null,
                 notes: '',
-                version_link: ''
+                version_link: '',
+                use_custom_date: false,
+                custom_date: ''
             });
             const [reportLink, setReportLink] = useState('');
             const [loading, setLoading] = useState(false);
@@ -1293,38 +1295,92 @@
             };
 
             const createNewVersion = async () => {
-                const nextVersionNumber = versions.length > 0 ? Math.max(...versions.map(v => v.edition_number)) + 1 : 1;
-                
-                let filePath = null;
-                if (formData.file) {
-                    const fileExt = formData.file.name.split('.').pop();
-                    const fileName = `${reportId}/v${nextVersionNumber}_${Date.now()}.${fileExt}`;
+                try {
+                    // Determine version date - either current date or user-selected date
+                    const versionDate = formData.use_custom_date && formData.custom_date 
+                        ? new Date(formData.custom_date + 'T00:00:00') 
+                        : new Date();
                     
-                    const { data: uploadData, error: uploadError } = await supabase.storage
-                        .from('report-files')
-                        .upload(fileName, formData.file);
+                    // Get all existing versions sorted by upload_date
+                    const { data: allVersions, error: versionsError } = await supabase
+                        .from('report_editions')
+                        .select('*')
+                        .eq('report_id', reportId)
+                        .order('upload_date', { ascending: true });
 
-                    if (uploadError) throw uploadError;
-                    filePath = uploadData.path;
+                    if (versionsError) throw versionsError;
+
+                    // Calculate what the new version number should be based on chronological position
+                    let newVersionNumber = 1;
+                    
+                    if (allVersions && allVersions.length > 0) {
+                        // Find where this new version fits chronologically
+                        const versionsWithNewOne = [...allVersions, { upload_date: versionDate.toISOString() }];
+                        versionsWithNewOne.sort((a, b) => new Date(a.upload_date) - new Date(b.upload_date));
+                        
+                        // Find the position of our new version
+                        const newVersionIndex = versionsWithNewOne.findIndex(v => v.upload_date === versionDate.toISOString());
+                        newVersionNumber = newVersionIndex + 1;
+
+                        // Check if we need to renumber existing versions
+                        const versionsToRenumber = allVersions.filter(v => new Date(v.upload_date) >= versionDate);
+                        
+                        if (versionsToRenumber.length > 0) {
+                            console.log('🔄 Renumbering existing versions due to chronological insertion...');
+                            
+                            // Update existing versions that come after this date
+                            for (const version of versionsToRenumber) {
+                                const oldNumber = version.edition_number;
+                                const newNumber = oldNumber + 1;
+                                
+                                await supabase
+                                    .from('report_editions')
+                                    .update({ edition_number: newNumber })
+                                    .eq('id', version.id);
+                                    
+                                console.log(`📊 Version updated: ${oldNumber} → ${newNumber}`);
+                            }
+                        }
+                    }
+
+                    // Upload file if provided
+                    let filePath = null;
+                    if (formData.file) {
+                        const fileExt = formData.file.name.split('.').pop();
+                        const fileName = `${reportId}/v${newVersionNumber}_${Date.now()}.${fileExt}`;
+                        
+                        const { data: uploadData, error: uploadError } = await supabase.storage
+                            .from('report-files')
+                            .upload(fileName, formData.file);
+
+                        if (uploadError) throw uploadError;
+                        filePath = uploadData.path;
+                    }
+
+                    // Insert the new version
+                    const { error: insertError } = await supabase
+                        .from('report_editions')
+                        .insert([{
+                            report_id: reportId,
+                            edition_number: newVersionNumber,
+                            file_name: formData.file?.name || null,
+                            file_path: filePath,
+                            file_size: formData.file?.size || null,
+                            notes: formData.notes,
+                            version_link: formData.version_link || null,
+                            upload_date: versionDate.toISOString(),
+                            uploaded_by: user.id
+                        }]);
+
+                    if (insertError) throw insertError;
+                    
+                    alert(`Version ${newVersionNumber} created successfully!${versionsToRenumber.length > 0 ? ` (${versionsToRenumber.length} existing versions renumbered)` : ''}`);
+                    onSuccess();
+                    
+                } catch (error) {
+                    console.error('Error in createNewVersion:', error);
+                    throw error;
                 }
-
-                const { error } = await supabase
-                    .from('report_editions')
-                    .insert([{
-                        report_id: reportId,
-                        edition_number: nextVersionNumber,
-                        file_name: formData.file?.name || null,
-                        file_path: filePath,
-                        file_size: formData.file?.size || null,
-                        notes: formData.notes,
-                        version_link: formData.version_link || null,
-                        uploaded_by: user.id
-                    }]);
-
-                if (error) throw error;
-                
-                alert(`Version ${nextVersionNumber} created successfully!`);
-                onSuccess();
             };
 
             const updateExistingVersion = async () => {
@@ -1509,6 +1565,52 @@
                                         Link specific to this version
                                     </p>
                                 </div>
+
+                                {mode === 'new' && (
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                                            Version Date
+                                        </label>
+                                        <div className="space-y-3">
+                                            <label className="flex items-center">
+                                                <input
+                                                    type="radio"
+                                                    name="date-option"
+                                                    checked={!formData.use_custom_date}
+                                                    onChange={() => setFormData({...formData, use_custom_date: false, custom_date: ''})}
+                                                    className="mr-2"
+                                                />
+                                                <span className="text-sm">Use current date ({new Date().toLocaleDateString()})</span>
+                                            </label>
+                                            
+                                            <label className="flex items-center">
+                                                <input
+                                                    type="radio"
+                                                    name="date-option"
+                                                    checked={formData.use_custom_date}
+                                                    onChange={() => setFormData({...formData, use_custom_date: true})}
+                                                    className="mr-2"
+                                                />
+                                                <span className="text-sm">Use custom date</span>
+                                            </label>
+                                            
+                                            {formData.use_custom_date && (
+                                                <div className="ml-6">
+                                                    <input
+                                                        type="date"
+                                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                                        value={formData.custom_date}
+                                                        onChange={(e) => setFormData({...formData, custom_date: e.target.value})}
+                                                        max={new Date().toISOString().split('T')[0]}
+                                                    />
+                                                    <p className="text-xs text-gray-500 mt-1">
+                                                        Version will be inserted chronologically and existing versions will be renumbered if needed
+                                                    </p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
 
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">
