@@ -458,7 +458,8 @@
                                     file_name,
                                     file_path,
                                     file_size,
-                                    notes
+                                    notes,
+                                    version_link
                                 )
                             `)
                             .order('created_date', { ascending: false });
@@ -494,7 +495,8 @@
                                     file_name,
                                     file_path,
                                     file_size,
-                                    notes
+                                    notes,
+                                    version_link
                                 ),
                                 user_report_permissions!inner (
                                     user_id
@@ -930,6 +932,7 @@
                     {showEditions && (
                         <div className="border-t bg-gray-50 p-4">
                             <h4 className="font-medium text-gray-900 mb-3">Report Versions</h4>
+                            {console.log('🔍 DEBUG - Showing versions for user:', user.role, 'Report editions:', report.report_editions?.length)}
                             {report.report_editions?.length > 0 ? (
                                 <div className="space-y-4 max-h-64 overflow-y-auto">
                                     {(() => {
@@ -1015,12 +1018,22 @@
                                                                         </div>
                                                                         
                                                                         <div className="flex items-center gap-1 ml-2">
+                                                                            {/* DEBUG: Log version data */}
+                                                                            {console.log('🔍 VERSION DEBUG:', {
+                                                                                version: edition.edition_number,
+                                                                                hasLink: !!edition.version_link,
+                                                                                link: edition.version_link,
+                                                                                hasFile: !!(edition.file_path && edition.file_name),
+                                                                                fileName: edition.file_name,
+                                                                                filePath: edition.file_path
+                                                                            })}
+                                                                            
                                                                             {edition.version_link && (
                                                                                 <a
                                                                                     href={edition.version_link}
                                                                                     target="_blank"
                                                                                     rel="noopener noreferrer"
-                                                                                    className="text-blue-600 hover:text-blue-800 p-1 rounded hover:bg-blue-100"
+                                                                                    className="text-blue-600 hover:text-blue-800 p-2 rounded hover:bg-blue-100 border border-blue-300"
                                                                                     title="View Version Link"
                                                                                 >
                                                                                     <i className="fas fa-external-link-alt"></i>
@@ -1030,25 +1043,32 @@
                                                                             {edition.file_path && edition.file_name && (
                                                                                 <button 
                                                                                     onClick={() => onDownload(edition.file_path, edition.file_name)}
-                                                                                    className="text-green-600 hover:text-green-800 p-1 rounded hover:bg-green-100"
+                                                                                    className="text-green-600 hover:text-green-800 p-2 rounded hover:bg-green-100 border border-green-300"
                                                                                     title="Download File"
                                                                                 >
                                                                                     <i className="fas fa-download"></i>
                                                                                 </button>
                                                                             )}
                                                                             
+                                                                            {/* Show debug info for testing */}
+                                                                            {!edition.version_link && !edition.file_path && (
+                                                                                <span className="text-xs text-red-500 bg-red-100 px-2 py-1 rounded">
+                                                                                    NO LINK/FILE
+                                                                                </span>
+                                                                            )}
+                                                                            
                                                                             {isAdmin && (
                                                                                 <>
                                                                                     <button 
                                                                                         onClick={() => editVersion(edition)}
-                                                                                        className="text-orange-600 hover:text-orange-800 p-1 rounded hover:bg-orange-100"
+                                                                                        className="text-orange-600 hover:text-orange-800 p-2 rounded hover:bg-orange-100 border border-orange-300"
                                                                                         title="Edit Version"
                                                                                     >
                                                                                         <i className="fas fa-edit"></i>
                                                                                     </button>
                                                                                     <button 
                                                                                         onClick={() => deleteVersion(edition)}
-                                                                                        className="text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-100"
+                                                                                        className="text-red-600 hover:text-red-800 p-2 rounded hover:bg-red-100 border border-red-300"
                                                                                         title="Delete Version"
                                                                                     >
                                                                                         <i className="fas fa-trash"></i>
