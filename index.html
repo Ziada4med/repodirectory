@@ -1330,14 +1330,22 @@
                             console.log('🔄 Renumbering existing versions due to chronological insertion...');
                             
                             // Update existing versions that come after this date
-                            for (const version of versionsToRenumber) {
+                            // IMPORTANT: Update in reverse order to avoid unique constraint violations
+                            const sortedVersions = versionsToRenumber.sort((a, b) => b.edition_number - a.edition_number);
+                            
+                            for (const version of sortedVersions) {
                                 const oldNumber = version.edition_number;
                                 const newNumber = oldNumber + 1;
                                 
-                                await supabase
+                                const { error: updateError } = await supabase
                                     .from('report_editions')
                                     .update({ edition_number: newNumber })
                                     .eq('id', version.id);
+                                
+                                if (updateError) {
+                                    console.error(`❌ Error updating version ${oldNumber} → ${newNumber}:`, updateError);
+                                    throw updateError;
+                                }
                                     
                                 console.log(`📊 Version updated: ${oldNumber} → ${newNumber}`);
                             }
