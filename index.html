@@ -880,19 +880,28 @@
                             {report.description}
                         </p>
 
-                        {report.report_link && (
-                            <div className="mb-4">
-                                <a
-                                    href={report.report_link}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-2 text-blue-600 hover:text-blue-800 text-sm font-medium"
-                                >
-                                    <i className="fas fa-external-link-alt"></i>
-                                    View Report Link
-                                </a>
-                            </div>
-                        )}
+                        {(() => {
+                            // Get the most recent version's link
+                            const latestVersion = report.report_editions?.length > 0 
+                                ? report.report_editions.sort((a, b) => new Date(b.upload_date) - new Date(a.upload_date))[0]
+                                : null;
+                            
+                            const displayLink = latestVersion?.version_link || report.report_link;
+                            
+                            return displayLink ? (
+                                <div className="mb-4">
+                                    <a
+                                        href={displayLink}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-2 text-blue-600 hover:text-blue-800 text-sm font-medium"
+                                    >
+                                        <i className="fas fa-external-link-alt"></i>
+                                        {latestVersion?.version_link ? `View Latest Version Link (v${latestVersion.edition_number})` : 'View Report Link'}
+                                    </a>
+                                </div>
+                            ) : null;
+                        })()}
 
                         <div className="space-y-2 mb-4">
                             <div className="flex justify-between text-sm">
