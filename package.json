@@ -1,0 +1,8 @@
+{
+  "name": "netlify-email-functions",
+  "version": "1.0.0",
+  "description": "Email sending functions for procurement reports",
+  "dependencies": {
+    "node-fetch": "^2.7.0"
+  }
+}
