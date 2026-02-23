@@ -31,6 +31,384 @@
         
         const supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
         
+        // =============================================================================
+        // EMAIL NOTIFICATION SYSTEM - INTEGRATED
+        // =============================================================================
+        
+        // Email notification helper function
+        const sendEmailNotification = async (action, data) => {
+            console.log(`🎯 EMAIL SYSTEM TRIGGERED - Action: ${action}`, data);
+            
+            try {
+                console.log(`📧 Starting ${action} notification process...`);
+                
+                // First try to use Supabase Edge Function (if deployed)
+                try {
+                    console.log('🔄 Attempting to use Supabase Edge Function...');
+                    const { data: emailResult, error: emailError } = await supabase.functions.invoke('send-notification', {
+                        body: { action, ...data }
+                    });
+
+                    if (emailError) {
+                        console.log('❌ Edge Function failed, trying direct API...', emailError);
+                        throw new Error(emailError.message);
+                    } else {
+                        console.log('✅ Email notifications sent via Edge Function:', emailResult);
+                        return { success: true, result: emailResult };
+                    }
+                } catch (edgeFunctionError) {
+                    console.log('⚡ Edge Function not available, using direct Resend API...', edgeFunctionError.message);
+                    
+                    // Fallback to direct email sending
+                    console.log('🔄 Starting direct email sending process...');
+                    return await sendEmailsDirectly(action, data);
+                }
+            } catch (emailErr) {
+                console.error('💥 COMPLETE EMAIL FAILURE:', emailErr);
+                alert(`Email Error: ${emailErr.message}`); // Show user the error
+                return { success: false, error: emailErr };
+            }
+        };
+
+        // Direct email sending using Resend API (fallback)
+        const sendEmailsDirectly = async (action, data) => {
+            console.log('🎯 DIRECT EMAIL SENDING - Action:', action, 'Data:', data);
+            const RESEND_API_KEY = 're_Qt4wLve3_7nJXrrVyEjRm2ka85BUAghnT';
+            
+            try {
+                let emailTargets = [];
+                
+                console.log('🔍 Determining email targets for action:', action);
+                
+                switch (action) {
+                    case 'new_version_viewers_only':
+                        console.log('📋 Getting viewers for new version notification...');
+                        emailTargets = await getViewersForReport(data.reportId, data.reportName);
+                        break;
+                    case 'new_report':
+                        console.log('📊 Getting admins for new report notification...');
+                        emailTargets = await getAdminsForNewReport(data.reportId, data.reportName);
+                        break;
+                    case 'user_access_granted':
+                        console.log('🔓 Getting user for access granted notification...');
+                        emailTargets = await getUserForAccessGrant(data.userId, data.reportId, data.reportName);
+                        break;
+                    default:
+                        throw new Error(`Unknown email action: ${action}`);
+                }
+
+                console.log('🎯 EMAIL TARGETS FOUND:', emailTargets.length, 'recipients');
+                
+                if (emailTargets.length === 0) {
+                    console.warn('⚠️ NO EMAIL TARGETS FOUND - No emails will be sent');
+                    return { success: true, result: { emailsSent: 0, message: 'No recipients found' } };
+                }
+
+                console.log('📧 EMAIL TARGETS:', emailTargets.map(t => ({ to: t.to, subject: t.subject })));
+
+                // Send all emails
+                console.log('🚀 Sending emails to Resend API...');
+                const results = await Promise.all(
+                    emailTargets.map((email, index) => {
+                        console.log(`📤 Sending email ${index + 1}/${emailTargets.length} to:`, email.to);
+                        return sendSingleEmail(email, RESEND_API_KEY);
+                    })
+                );
+
+                console.log('✅ ALL EMAILS SENT SUCCESSFULLY:', results);
+                return { success: true, result: { emailsSent: results.length, results } };
+                
+            } catch (error) {
+                console.error('💥 DIRECT EMAIL ERROR:', error);
+                throw error;
+            }
+        };
+
+        // Send individual email via Resend API
+        const sendSingleEmail = async (emailData, apiKey) => {
+            const response = await fetch('https://api.resend.com/emails', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(emailData)
+            });
+
+            if (!response.ok) {
+                throw new Error(`Email API error: ${await response.text()}`);
+            }
+
+            return await response.json();
+        };
+
+        // Get viewers for report notification
+        const getViewersForReport = async (reportId, reportName) => {
+            console.log('🔍 SEARCHING FOR VIEWERS - Report ID:', reportId, 'Report Name:', reportName);
+            
+            // Fixed query with explicit foreign key relationship
+            const { data: viewers, error: viewersError } = await supabase
+                .from('user_report_permissions')
+                .select(`
+                    user_id,
+                    app_users!user_report_permissions_user_id_fkey (
+                        email,
+                        full_name,
+                        role,
+                        is_active
+                    )
+                `)
+                .eq('report_id', reportId)
+                .eq('app_users.role', 'Viewer')
+                .eq('app_users.is_active', true);
+
+            console.log('📊 VIEWERS QUERY RESULT:', { viewers, error: viewersError });
+
+            if (viewersError) {
+                console.error('❌ Error fetching viewers:', viewersError);
+                
+                // Fallback: try a simpler approach
+                console.log('🔄 Trying fallback query...');
+                
+                // Get permissions first, then users separately
+                const { data: permissions } = await supabase
+                    .from('user_report_permissions')
+                    .select('user_id')
+                    .eq('report_id', reportId);
+                
+                if (permissions && permissions.length > 0) {
+                    const userIds = permissions.map(p => p.user_id);
+                    
+                    const { data: users } = await supabase
+                        .from('app_users')
+                        .select('id, email, full_name, role')
+                        .in('id', userIds)
+                        .eq('role', 'Viewer')
+                        .eq('is_active', true);
+                    
+                    console.log('📊 FALLBACK QUERY RESULT:', users);
+                    
+                    if (users && users.length > 0) {
+                        return users.map(user => ({
+                            from: 'Procurement Reports <reports@repodirectory.netlify.app>',
+                            to: user.email,
+                            subject: `🔔 New Version Available: ${reportName}`,
+                            html: getNewVersionEmailHTML(user.full_name, reportName, 'Latest', 'Today', '')
+                        }));
+                    }
+                }
+                
+                throw viewersError;
+            }
+
+            console.log('👥 FOUND VIEWERS:', viewers?.length || 0);
+            
+            if (viewers && viewers.length > 0) {
+                viewers.forEach((viewer, index) => {
+                    console.log(`👤 Viewer ${index + 1}:`, {
+                        email: viewer.app_users.email,
+                        name: viewer.app_users.full_name,
+                        role: viewer.app_users.role
+                    });
+                });
+            } else {
+                console.warn('⚠️ NO VIEWERS FOUND for report:', reportName);
+                console.log('💡 This could mean:');
+                console.log('   - No users have Viewer role with access to this report');  
+                console.log('   - user_report_permissions table is empty for this report');
+                console.log('   - All users with access are Admins (excluded from viewer notifications)');
+            }
+
+            // Get latest version info
+            const { data: latestVersion, error: versionError } = await supabase
+                .from('report_editions')
+                .select('edition_number, upload_date, notes')
+                .eq('report_id', reportId)
+                .order('upload_date', { ascending: false })
+                .limit(1)
+                .single();
+
+            console.log('📋 LATEST VERSION INFO:', { latestVersion, error: versionError });
+
+            const versionNumber = latestVersion?.edition_number || 'Latest';
+            const uploadDate = latestVersion?.upload_date ? new Date(latestVersion.upload_date).toLocaleDateString() : 'Today';
+            const versionNotes = latestVersion?.notes ? `<p><strong>Version Notes:</strong> ${latestVersion.notes}</p>` : '';
+
+            const emailTargets = viewers?.map(viewer => ({
+                from: 'Procurement Reports <reports@repodirectory.netlify.app>',
+                to: viewer.app_users.email,
+                subject: `🔔 New Version Available: ${reportName} (v${versionNumber})`,
+                html: getNewVersionEmailHTML(viewer.app_users.full_name, reportName, versionNumber, uploadDate, versionNotes)
+            })) || [];
+
+            console.log('📧 EMAIL TARGETS CREATED:', emailTargets.length);
+            return emailTargets;
+        };
+
+        // Get admins for new report notification
+        const getAdminsForNewReport = async (reportId, reportName) => {
+            // Simple query - no joins needed, just get admins directly
+            const { data: admins, error: adminsError } = await supabase
+                .from('app_users')
+                .select('email, full_name')
+                .eq('role', 'Admin')
+                .eq('is_active', true);
+
+            if (adminsError) {
+                console.error('❌ Error fetching admins:', adminsError);
+                throw adminsError;
+            }
+
+            return admins?.map(admin => ({
+                from: 'Procurement Reports <reports@repodirectory.netlify.app>',
+                to: admin.email,
+                subject: `📊 New Report Created: ${reportName}`,
+                html: getNewReportEmailHTML(admin.full_name, reportName)
+            })) || [];
+        };
+
+        // Get user for access granted notification
+        const getUserForAccessGrant = async (userId, reportId, reportName) => {
+            const { data: user } = await supabase
+                .from('app_users')
+                .select('email, full_name')
+                .eq('id', userId)
+                .single();
+
+            if (!user) return [];
+
+            return [{
+                from: 'Procurement Reports <reports@repodirectory.netlify.app>',
+                to: user.email,
+                subject: `🔓 Access Granted: ${reportName}`,
+                html: getAccessGrantedEmailHTML(user.full_name, reportName)
+            }];
+        };
+
+        // EMAIL TEMPLATES
+        const getNewVersionEmailHTML = (userName, reportName, versionNumber, uploadDate, versionNotes) => `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #f9fafb; padding: 20px;">
+                <div style="background: white; border-radius: 8px; padding: 30px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                    <div style="text-align: center; border-bottom: 2px solid #e5e7eb; padding-bottom: 20px; margin-bottom: 25px;">
+                        <h1 style="color: #1f2937; margin: 0; font-size: 24px;">📋 New Report Version</h1>
+                        <p style="color: #6b7280; margin: 5px 0 0 0; font-size: 14px;">Procurement Reports System</p>
+                    </div>
+                    <div style="margin-bottom: 25px;">
+                        <h2 style="color: #2563eb; margin: 0 0 15px 0; font-size: 20px;">${reportName}</h2>
+                        <p style="color: #374151; margin: 0 0 10px 0; font-size: 16px;">Hello ${userName},</p>
+                        <p style="color: #374151; margin: 0 0 15px 0; line-height: 1.5;">
+                            Great news! A new version (<strong>Version ${versionNumber}</strong>) of the report you follow has been published on ${uploadDate}.
+                        </p>
+                        ${versionNotes}
+                    </div>
+                    <div style="background: #eff6ff; border: 1px solid #dbeafe; border-radius: 6px; padding: 20px; margin: 20px 0;">
+                        <h3 style="color: #1e40af; margin: 0 0 10px 0; font-size: 16px;">📋 What you can do:</h3>
+                        <ul style="color: #374151; margin: 0; padding-left: 20px;">
+                            <li style="margin-bottom: 5px;">View and download the latest version</li>
+                            <li style="margin-bottom: 5px;">Access version-specific links and resources</li>
+                            <li style="margin-bottom: 5px;">Compare with previous versions</li>
+                            <li>Read detailed version notes and updates</li>
+                        </ul>
+                    </div>
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="https://repodirectory.netlify.app/" 
+                           style="background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; font-size: 16px;">
+                            📖 View New Version
+                        </a>
+                    </div>
+                    <div style="background: #f0f9ff; border-left: 4px solid #0ea5e9; padding: 15px; margin: 20px 0;">
+                        <p style="margin: 0; color: #0c4a6e; font-size: 14px;">
+                            💡 <strong>Tip:</strong> Click "View Versions" in the report card to see all available versions and their release dates.
+                        </p>
+                    </div>
+                    <div style="text-align: center; border-top: 1px solid #e5e7eb; padding-top: 20px; margin-top: 30px;">
+                        <p style="color: #6b7280; font-size: 12px; margin: 0 0 5px 0;">
+                            You're receiving this because you have view access to this report.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        const getNewReportEmailHTML = (adminName, reportName) => `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #059669;">New Report Created</h2>
+                <p>Hello ${adminName},</p>
+                <p>A new report <strong>${reportName}</strong> has been created in the procurement system.</p>
+                <p>As an administrator, you can now:</p>
+                <ul>
+                    <li>Review the report content</li>
+                    <li>Assign user permissions</li>
+                    <li>Manage report versions</li>
+                </ul>
+                <p>
+                    <a href="https://repodirectory.netlify.app/" 
+                       style="background: #059669; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
+                        Manage Report
+                    </a>
+                </p>
+            </div>
+        `;
+
+        const getAccessGrantedEmailHTML = (userName, reportName) => `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #7c3aed;">Access Granted</h2>
+                <p>Hello ${userName},</p>
+                <p>You now have access to <strong>${reportName}</strong> in the procurement reports system.</p>
+                <p>You can now:</p>
+                <ul>
+                    <li>View all versions of the report</li>
+                    <li>Download report files</li>
+                    <li>Access version-specific links</li>
+                </ul>
+                <p>
+                    <a href="https://repodirectory.netlify.app/" 
+                       style="background: #7c3aed; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
+                        View Report
+                    </a>
+                </p>
+            </div>
+        `;
+
+        // Test email system function - MOVED TO GLOBAL SCOPE
+        window.testEmailSystem = async () => {
+            console.log('🧪 TESTING EMAIL SYSTEM...');
+            
+            // Use the first available report
+            const testReports = [
+                { id: 'dee3add2-5b98-41f0-9545-ae15e9198a0b', name: 'PR PENDING REPORT' },
+                { id: 'test-id', name: 'DISCREPANCY REPORT' }
+            ];
+            
+            const firstReport = testReports[0];
+            console.log('🎯 Testing email with report:', firstReport.name, 'ID:', firstReport.id);
+            
+            try {
+                const result = await sendEmailNotification('new_version_viewers_only', {
+                    reportId: firstReport.id,
+                    reportName: firstReport.name
+                });
+                
+                if (result.success) {
+                    alert(`✅ Test successful! Sent ${result.result.emailsSent} emails.`);
+                    console.log('🎉 TEST EMAIL RESULT:', result);
+                } else {
+                    alert(`❌ Test failed: ${result.error?.message || 'Unknown error'}`);
+                    console.log('💥 TEST EMAIL FAILED:', result);
+                }
+            } catch (error) {
+                alert(`💥 Test crashed: ${error.message}`);
+                console.log('🚨 TEST EMAIL CRASHED:', error);
+            }
+        };
+
+        // Simple console command for testing emails
+        window.testEmail = () => window.testEmailSystem();
+
+        // =============================================================================
+        // END EMAIL NOTIFICATION SYSTEM
+        // =============================================================================
+        
         // Test Supabase connection
         const testSupabaseConnection = async () => {
             try {
@@ -610,6 +988,13 @@
                                             >
                                                 <i className="fas fa-plus"></i>
                                                 Add Report
+                                            </button>
+                                            <button
+                                                onClick={() => window.testEmailSystem()}
+                                                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors"
+                                            >
+                                                <i className="fas fa-envelope"></i>
+                                                Test Email
                                             </button>
                                         </>
                                     )}
@@ -1236,6 +1621,17 @@
 
                     console.log('✅ Report added successfully');
                     alert(`Report "${formData.name}" added successfully!${formData.attachment_file ? ' File uploaded as version 1.' : ''}`);
+                    
+                    // Send email notifications to admins
+                    const emailResult = await sendEmailNotification('new_report', {
+                        reportId: reportData.id,
+                        reportName: formData.name
+                    });
+                    
+                    if (emailResult.success) {
+                        console.log(`📧 Successfully notified ${emailResult.result.emailsSent} admins`);
+                    }
+
                     onSuccess();
                 } catch (error) {
                     console.error('Error adding report:', error);
@@ -1526,6 +1922,17 @@
                     if (insertError) throw insertError;
                     
                     alert(`Version ${newVersionNumber} created successfully!${versionsToRenumber.length > 0 ? ` (${versionsToRenumber.length} existing versions renumbered)` : ''}`);
+                    
+                    // Send email notifications to viewers only
+                    const emailResult = await sendEmailNotification('new_version_viewers_only', {
+                        reportId: reportId,
+                        reportName: reportName
+                    });
+                    
+                    if (emailResult.success) {
+                        console.log(`📧 Successfully notified ${emailResult.result.emailsSent} viewers`);
+                    }
+
                     onSuccess();
                     
                 } catch (error) {
@@ -1576,6 +1983,19 @@
 
                 alert(`Version ${selectedVersion.edition_number} updated successfully!`);
                 onSuccess();
+            };
+
+            const sendViewerNotification = async () => {
+                const emailResult = await sendEmailNotification('new_version_viewers_only', {
+                    reportId: reportId,
+                    reportName: reportName
+                });
+                
+                if (emailResult.success) {
+                    alert(`✅ Notifications sent to ${emailResult.result.emailsSent} viewers!`);
+                } else {
+                    alert(`❌ Failed to send notifications: ${emailResult.error?.message || 'Unknown error'}`);
+                }
             };
 
             return (
@@ -1796,9 +2216,23 @@
                                         type="button"
                                         onClick={() => {setMode(''); setSelectedVersion(null);}}
                                         className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                                        disabled={loading}
                                     >
                                         Back
                                     </button>
+                                    
+                                    {mode === 'new' && (
+                                        <button
+                                            type="button"
+                                            onClick={() => sendViewerNotification()}
+                                            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+                                            disabled={loading}
+                                        >
+                                            <i className="fas fa-bell mr-2"></i>
+                                            Notify Viewers
+                                        </button>
+                                    )}
+                                    
                                     <button
                                         type="submit"
                                         disabled={loading}
