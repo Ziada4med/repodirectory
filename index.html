@@ -87,13 +87,6 @@
                     alert(`❌ Email sending failed: ${apiResult.error || 'Netlify Function not deployed yet'}`);
                     return { success: false, error: apiResult };
                 }
-                    
-                    // Fallback: Show notification instead
-                    const recipientList = emailTargets.map(t => t.to).join('\n');
-                    alert(`📧 EMAIL TARGETS IDENTIFIED!\n\n${emailTargets.length} emails would be sent to:\n\n${recipientList}\n\nTo enable real sending:\n1. Upload simple-email-sender.html to Netlify\n2. Try again`);
-                    
-                    return { success: true, result: { emailsSent: 0, message: 'Fallback mode' } };
-                }
                 
             } catch (emailErr) {
                 console.error('💥 COMPLETE EMAIL FAILURE:', emailErr);
