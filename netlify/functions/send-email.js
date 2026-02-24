@@ -1,4 +1,4 @@
-// netlify/functions/send-email.js - SendGrid Version
+// netlify/functions/send-email.js - SendGrid Version with Environment Variables
 exports.handler = async (event, context) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
@@ -29,7 +29,20 @@ exports.handler = async (event, context) => {
       };
     }
 
-    const SENDGRID_API_KEY = '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';
+    // Get API key from environment variables (secure)
+    const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
+
+    if (!SENDGRID_API_KEY) {
+      console.error('❌ SendGrid API key not found in environment variables');
+      return {
+        statusCode: 500,
+        headers,
+        body: JSON.stringify({ 
+          success: false,
+          error: 'SendGrid API key not configured. Please add SENDGRID_API_KEY to environment variables.' 
+        })
+      };
+    }
 
     console.log(`📧 Processing ${emails.length} emails via SendGrid...`);
 
