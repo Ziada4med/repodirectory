@@ -47,7 +47,7 @@ exports.handler = async (event, context) => {
               'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-              from: 'Procurement Reports <reports@repodirectory.netlify.app>',
+              from: 'Procurement Reports <onboarding@resend.dev>',
               to: emailData.to,
               subject: emailData.subject,
               html: emailData.html
