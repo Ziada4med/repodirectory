@@ -65,37 +65,28 @@
 
                 console.log('📧 EMAIL TARGETS:', emailTargets.map(t => ({ to: t.to, subject: t.subject })));
                 
-                // Send emails via simple method
-                console.log('🚀 Sending emails via simple email sender...');
+                // Send emails via Netlify Function
+                console.log('🚀 Sending emails via Netlify Function...');
                 
-                try {
-                    // Create hidden iframe to load email sender
-                    const iframe = document.createElement('iframe');
-                    iframe.style.display = 'none';
-                    iframe.src = 'https://repodirectory.netlify.app/simple-email-sender.html';
-                    document.body.appendChild(iframe);
-                    
-                    // Wait for iframe to load
-                    await new Promise((resolve) => {
-                        iframe.onload = resolve;
-                        setTimeout(resolve, 3000); // Fallback timeout
-                    });
-                    
-                    // Use the email sender
-                    const apiResult = await iframe.contentWindow.sendEmailsToResend(emailTargets);
-                    document.body.removeChild(iframe);
-                    
-                    if (apiResult.success) {
-                        console.log('✅ EMAILS SENT SUCCESSFULLY:', apiResult);
-                        alert(`✅ SUCCESS! Sent ${apiResult.emailsSent}/${apiResult.totalEmails} emails successfully!`);
-                        return { success: true, result: apiResult };
-                    } else {
-                        console.error('❌ EMAIL SENDING FAILED:', apiResult);
-                        alert(`❌ Email sending failed: ${apiResult.error || 'Unknown error'}`);
-                        return { success: false, error: apiResult };
-                    }
-                } catch (emailError) {
-                    console.error('💥 EMAIL SYSTEM ERROR:', emailError);
+                const apiResponse = await fetch('https://repodirectory.netlify.app/.netlify/functions/send-email', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ emails: emailTargets })
+                });
+                
+                const apiResult = await apiResponse.json();
+                
+                if (apiResponse.ok && apiResult.success) {
+                    console.log('✅ EMAILS SENT SUCCESSFULLY:', apiResult);
+                    alert(`✅ SUCCESS! Sent ${apiResult.emailsSent}/${apiResult.totalEmails} emails successfully!`);
+                    return { success: true, result: apiResult };
+                } else {
+                    console.error('❌ EMAIL SENDING FAILED:', apiResult);
+                    alert(`❌ Email sending failed: ${apiResult.error || 'Netlify Function not deployed yet'}`);
+                    return { success: false, error: apiResult };
+                }
                     
                     // Fallback: Show notification instead
                     const recipientList = emailTargets.map(t => t.to).join('\n');
