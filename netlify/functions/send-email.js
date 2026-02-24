@@ -1,6 +1,4 @@
-// netlify/functions/send-email.js
-const fetch = require('node-fetch');
-
+// netlify/functions/send-email.js - SendGrid Version
 exports.handler = async (event, context) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
@@ -31,44 +29,51 @@ exports.handler = async (event, context) => {
       };
     }
 
-    const RESEND_API_KEY = 're_Qt4wLve3_7nJXrrVyEjRm2ka85BUAghnT';
+    const SENDGRID_API_KEY = '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';
 
-    console.log(`📧 Processing ${emails.length} emails...`);
+    console.log(`📧 Processing ${emails.length} emails via SendGrid...`);
 
     const results = await Promise.all(
       emails.map(async (emailData, index) => {
         try {
           console.log(`📤 Sending email ${index + 1}/${emails.length} to: ${emailData.to}`);
           
-          const response = await fetch('https://api.resend.com/emails', {
+          const response = await fetch('https://api.sendgrid.com/v3/mail/send', {
             method: 'POST',
             headers: {
-              'Authorization': `Bearer ${RESEND_API_KEY}`,
+              'Authorization': `Bearer ${SENDGRID_API_KEY}`,
               'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-              from: 'Procurement Reports <onboarding@resend.dev>',
-              to: emailData.to,
-              subject: emailData.subject,
-              html: emailData.html
+              personalizations: [{
+                to: [{ email: emailData.to }],
+                subject: emailData.subject
+              }],
+              from: { 
+                email: 'ziad.ahmed@nesmapartners.com', 
+                name: 'Procurement Reports' 
+              },
+              content: [{
+                type: 'text/html',
+                value: emailData.html
+              }]
             })
           });
 
-          const result = await response.json();
-          
-          if (response.ok) {
+          if (response.status === 202) { // SendGrid success status
             console.log(`✅ Email ${index + 1} sent successfully to ${emailData.to}`);
             return {
               success: true,
               email: emailData.to,
-              messageId: result.id || 'unknown'
+              messageId: response.headers.get('x-message-id') || 'sent'
             };
           } else {
-            console.error(`❌ Email ${index + 1} failed for ${emailData.to}:`, result);
+            const errorText = await response.text();
+            console.error(`❌ Email ${index + 1} failed for ${emailData.to}:`, errorText);
             return {
               success: false,
               email: emailData.to,
-              error: result.message || 'Unknown error'
+              error: errorText || 'SendGrid API error'
             };
           }
         } catch (emailError) {
@@ -85,7 +90,7 @@ exports.handler = async (event, context) => {
     const successCount = results.filter(r => r.success).length;
     const failureCount = results.filter(r => !r.success).length;
 
-    console.log(`🎉 EMAIL SUMMARY: ${successCount} successful, ${failureCount} failed`);
+    console.log(`🎉 SENDGRID SUMMARY: ${successCount} successful, ${failureCount} failed`);
 
     return {
       statusCode: 200,
@@ -103,7 +108,7 @@ exports.handler = async (event, context) => {
     };
 
   } catch (error) {
-    console.error('💥 NETLIFY FUNCTION ERROR:', error);
+    console.error('💥 SENDGRID FUNCTION ERROR:', error);
     return {
       statusCode: 500,
       headers,
