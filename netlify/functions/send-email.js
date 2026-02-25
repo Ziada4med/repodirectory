@@ -63,9 +63,10 @@ exports.handler = async (event, context) => {
                 subject: emailData.subject
               }],
               from: { 
-                email: 'ziad.ahmed@nesmapartners.com', 
-                name: 'Procurement Reports' 
-              },
+  email: 'noreply@sendgrid.net', 
+  name: 'Procurement Reports (Ziad Ahmed)' 
+},
+
               content: [{
                 type: 'text/html',
                 value: emailData.html
