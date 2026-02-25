@@ -1,4 +1,4 @@
-// netlify/functions/send-email.js - SendGrid Version with Environment Variable
+// netlify/functions/send-email.js - Brevo Version
 exports.handler = async (event, context) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
@@ -29,60 +29,54 @@ exports.handler = async (event, context) => {
       };
     }
 
-    // Get API key from environment variables (secure)
-    const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
+    // Get Brevo API key from environment variables
+    const BREVO_API_KEY = process.env.BREVO_API_KEY;
 
-    if (!SENDGRID_API_KEY) {
-      console.error('❌ SendGrid API key not found in environment variables');
+    if (!BREVO_API_KEY) {
+      console.error('❌ Brevo API key not found in environment variables');
       return {
         statusCode: 500,
         headers,
         body: JSON.stringify({ 
           success: false,
-          error: 'SendGrid API key not configured. Please add SENDGRID_API_KEY to environment variables.' 
+          error: 'Brevo API key not configured. Please add BREVO_API_KEY to environment variables.' 
         })
       };
     }
 
-    console.log(`📧 Processing ${emails.length} emails via SendGrid...`);
+    console.log(`📧 Processing ${emails.length} emails via Brevo...`);
 
     const results = await Promise.all(
       emails.map(async (emailData, index) => {
         try {
           console.log(`📤 Sending email ${index + 1}/${emails.length} to: ${emailData.to}`);
           
-          const response = await fetch('https://api.sendgrid.com/v3/mail/send', {
+          const response = await fetch('https://api.brevo.com/v3/smtp/email', {
             method: 'POST',
             headers: {
-              'Authorization': `Bearer ${SENDGRID_API_KEY}`,
+              'api-key': BREVO_API_KEY,
               'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-              personalizations: [{
-                to: [{ email: emailData.to }],
-                subject: emailData.subject
+              sender: {
+                name: 'Procurement Reports',
+                email: 'proc.prism@gmail.com'
+              },
+              to: [{
+                email: emailData.to
               }],
-              from: { 
-                email: 'proc.prism@gmail.com', 
-                name: 'Procurement Reports' 
-              },
-              reply_to: {
-                email: 'proc.prism@gmail.com',
-                name: 'Procurement Reports'
-              },
-              content: [{
-                type: 'text/html',
-                value: emailData.html
-              }]
+              subject: emailData.subject,
+              htmlContent: emailData.html
             })
           });
 
-          if (response.status === 202) {
+          if (response.status === 201) { // Brevo success status
+            const result = await response.json();
             console.log(`✅ Email ${index + 1} sent successfully to ${emailData.to}`);
             return {
               success: true,
               email: emailData.to,
-              messageId: response.headers.get('x-message-id') || 'sent'
+              messageId: result.messageId || 'sent'
             };
           } else {
             const errorText = await response.text();
@@ -90,7 +84,7 @@ exports.handler = async (event, context) => {
             return {
               success: false,
               email: emailData.to,
-              error: errorText || 'SendGrid API error'
+              error: errorText || 'Brevo API error'
             };
           }
         } catch (emailError) {
@@ -107,7 +101,7 @@ exports.handler = async (event, context) => {
     const successCount = results.filter(r => r.success).length;
     const failureCount = results.filter(r => !r.success).length;
 
-    console.log(`🎉 SENDGRID SUMMARY: ${successCount} successful, ${failureCount} failed`);
+    console.log(`🎉 BREVO SUMMARY: ${successCount} successful, ${failureCount} failed`);
 
     return {
       statusCode: 200,
@@ -125,7 +119,7 @@ exports.handler = async (event, context) => {
     };
 
   } catch (error) {
-    console.error('💥 SENDGRID FUNCTION ERROR:', error);
+    console.error('💥 BREVO FUNCTION ERROR:', error);
     return {
       statusCode: 500,
       headers,
