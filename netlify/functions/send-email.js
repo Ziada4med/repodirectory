@@ -1,4 +1,4 @@
-// netlify/functions/send-email.js - SendGrid Version with Environment Variables
+// netlify/functions/send-email.js - SendGrid Version with Environment Variable
 exports.handler = async (event, context) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
@@ -63,10 +63,13 @@ exports.handler = async (event, context) => {
                 subject: emailData.subject
               }],
               from: { 
-  email: 'noreply@sendgrid.net', 
-  name: 'Procurement Reports (Ziad Ahmed)' 
-},
-
+                email: 'proc.prism@gmail.com', 
+                name: 'Procurement Reports' 
+              },
+              reply_to: {
+                email: 'proc.prism@gmail.com',
+                name: 'Procurement Reports'
+              },
               content: [{
                 type: 'text/html',
                 value: emailData.html
@@ -74,7 +77,7 @@ exports.handler = async (event, context) => {
             })
           });
 
-          if (response.status === 202) { // SendGrid success status
+          if (response.status === 202) {
             console.log(`✅ Email ${index + 1} sent successfully to ${emailData.to}`);
             return {
               success: true,
