@@ -49,6 +49,9 @@
                     case 'new_version_viewers_only':
                         emailTargets = await getViewersForReportWorking(data.reportId, data.reportName);
                         break;
+                    case 'version_updated':
+                        emailTargets = await getViewersForVersionUpdate(data.reportId, data.reportName, data.versionId);
+                        break;
                     case 'new_report':
                         emailTargets = await getAdminsForNewReportWorking(data.reportId, data.reportName);
                         break;
@@ -198,6 +201,83 @@
             })) || [];
         };
 
+        // Get viewers for version update notification - NEW FUNCTION
+        const getViewersForVersionUpdate = async (reportId, reportName, versionId) => {
+            console.log('🔄 SEARCHING FOR VIEWERS - VERSION UPDATE - Report ID:', reportId, 'Version ID:', versionId);
+            
+            try {
+                // Step 1: Get permissions without joins
+                const { data: permissions, error: permError } = await supabase
+                    .from('user_report_permissions')
+                    .select('user_id')
+                    .eq('report_id', reportId);
+                
+                console.log('📊 PERMISSIONS RESULT:', { permissions, error: permError });
+                
+                if (permError || !permissions || permissions.length === 0) {
+                    console.log('❌ No permissions found for this report');
+                    return [];
+                }
+                
+                // Step 2: Get users separately
+                console.log('👥 Getting viewer users...');
+                const userIds = permissions.map(p => p.user_id);
+                console.log('🔍 User IDs with access:', userIds);
+                
+                const { data: users, error: usersError } = await supabase
+                    .from('app_users')
+                    .select('id, email, full_name, role, is_active')
+                    .in('id', userIds)
+                    .eq('role', 'Viewer')
+                    .eq('is_active', true);
+                
+                console.log('📊 VIEWER USERS RESULT:', { users, error: usersError });
+                
+                if (usersError) {
+                    console.error('❌ Error getting users:', usersError);
+                    throw usersError;
+                }
+                
+                if (!users || users.length === 0) {
+                    console.log('⚠️ No Viewer users found with access to this report');
+                    return [];
+                }
+                
+                console.log(`✅ Found ${users.length} viewer(s) with access!`);
+                users.forEach((user, i) => {
+                    console.log(`👤 Viewer ${i+1}: ${user.full_name} (${user.email})`);
+                });
+                
+                // Get updated version info
+                const { data: updatedVersion, error: versionError } = await supabase
+                    .from('report_editions')
+                    .select('edition_number, upload_date, notes, version_link')
+                    .eq('id', versionId)
+                    .single();
+
+                console.log('📋 UPDATED VERSION INFO:', { updatedVersion, error: versionError });
+
+                const versionNumber = updatedVersion?.edition_number || 'Unknown';
+                const uploadDate = updatedVersion?.upload_date ? new Date(updatedVersion.upload_date).toLocaleDateString() : 'Today';
+                const versionNotes = updatedVersion?.notes ? `<p><strong>Update Notes:</strong> ${updatedVersion.notes}</p>` : '';
+                const versionLink = updatedVersion?.version_link || null;
+
+                // Create email targets with HTML templates for version updates
+                const emailTargets = users.map(user => ({
+                    to: user.email,
+                    subject: `🔄 Version Updated: ${reportName} (v${versionNumber})`,
+                    html: createVersionUpdateEmailHTML(user.full_name, reportName, versionNumber, uploadDate, versionNotes, versionLink)
+                }));
+                
+                console.log('📧 EMAIL TARGETS CREATED:', emailTargets.length);
+                return emailTargets;
+                
+            } catch (error) {
+                console.error('💥 Error in getViewersForVersionUpdate:', error);
+                throw error;
+            }
+        };
+
         // EMAIL TEMPLATES WITH VERSION LINK BUTTONS
         const createVersionEmailHTML = (userName, reportName, versionNumber, uploadDate, versionNotes, versionLink) => `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #f9fafb; padding: 20px;">
@@ -238,6 +318,57 @@
                     <div style="background: #f0f9ff; border-left: 4px solid #0ea5e9; padding: 15px; margin: 20px 0;">
                         <p style="margin: 0; color: #0c4a6e; font-size: 14px;">
                             💡 <strong>Tip:</strong> Click "View Versions" in the report card to see all available versions and their release dates.
+                        </p>
+                    </div>
+                    <div style="text-align: center; border-top: 1px solid #e5e7eb; padding-top: 20px; margin-top: 30px;">
+                        <p style="color: #6b7280; font-size: 12px; margin: 0 0 5px 0;">
+                            You're receiving this because you have view access to this report.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // EMAIL TEMPLATE FOR VERSION UPDATES - NEW TEMPLATE
+        const createVersionUpdateEmailHTML = (userName, reportName, versionNumber, uploadDate, versionNotes, versionLink) => `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #f9fafb; padding: 20px;">
+                <div style="background: white; border-radius: 8px; padding: 30px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                    <div style="text-align: center; border-bottom: 2px solid #e5e7eb; padding-bottom: 20px; margin-bottom: 25px;">
+                        <h1 style="color: #1f2937; margin: 0; font-size: 24px;">🔄 Report Version Updated</h1>
+                        <p style="color: #6b7280; margin: 5px 0 0 0; font-size: 14px;">Procurement Reports System</p>
+                    </div>
+                    <div style="margin-bottom: 25px;">
+                        <h2 style="color: #ea580c; margin: 0 0 15px 0; font-size: 20px;">${reportName}</h2>
+                        <p style="color: #374151; margin: 0 0 10px 0; font-size: 16px;">Hello ${userName},</p>
+                        <p style="color: #374151; margin: 0 0 15px 0; line-height: 1.5;">
+                            <strong>Version ${versionNumber || 'Unknown'}</strong> of the report you follow has been updated with new information on ${uploadDate || 'today'}.
+                        </p>
+                        ${versionNotes || ''}
+                    </div>
+                    <div style="background: #fff7ed; border: 1px solid #fed7aa; border-radius: 6px; padding: 20px; margin: 20px 0;">
+                        <h3 style="color: #ea580c; margin: 0 0 10px 0; font-size: 16px;">🔄 What's changed:</h3>
+                        <ul style="color: #374151; margin: 0; padding-left: 20px;">
+                            <li style="margin-bottom: 5px;">Updated content and data</li>
+                            <li style="margin-bottom: 5px;">Revised links or resources</li>
+                            <li style="margin-bottom: 5px;">New insights or information</li>
+                            <li>Enhanced version notes</li>
+                        </ul>
+                    </div>
+                    <div style="text-align: center; margin: 30px 0;">
+                        ${versionLink ? `
+                            <a href="${versionLink}" 
+                               style="background: linear-gradient(135deg, #ea580c 0%, #dc2626 100%); color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; font-size: 16px; margin: 0 10px 10px 0;">
+                                🔗 View Updated Version
+                            </a>
+                        ` : ''}
+                        <a href="https://repodirectory.netlify.app/" 
+                           style="background: linear-gradient(135deg, #059669 0%, #047857 100%); color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; font-size: 16px; margin: 0 10px 10px 0;">
+                            📋 View All Reports
+                        </a>
+                    </div>
+                    <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0;">
+                        <p style="margin: 0; color: #92400e; font-size: 14px;">
+                            🔄 <strong>Note:</strong> This is an update to an existing version, not a completely new version. Check the update notes for specific changes.
                         </p>
                     </div>
                     <div style="text-align: center; border-top: 1px solid #e5e7eb; padding-top: 20px; margin-top: 30px;">
@@ -2189,6 +2320,21 @@
                         .eq('id', version.id);
 
                     if (updateError) throw updateError;
+
+                    console.log('✅ Version updated successfully, triggering email notification...');
+                    
+                    // Trigger email notification for version update
+                    try {
+                        await sendEmailNotification('version_updated', {
+                            reportId: report.id,
+                            reportName: report.name,
+                            versionId: version.id
+                        });
+                        console.log('📧 Version update email notifications sent');
+                    } catch (emailError) {
+                        console.error('⚠️ Email notification failed:', emailError);
+                        // Don't fail the update if email fails
+                    }
 
                     alert(`Version ${version.edition_number} updated successfully!`);
                     onSuccess();
