@@ -142,11 +142,27 @@
                     console.log(`👤 Viewer ${i+1}: ${user.full_name} (${user.email})`);
                 });
                 
+                // Get latest version info
+                const { data: latestVersion, error: versionError } = await supabase
+                    .from('report_editions')
+                    .select('edition_number, upload_date, notes, link')
+                    .eq('report_id', reportId)
+                    .order('upload_date', { ascending: false })
+                    .limit(1)
+                    .single();
+
+                console.log('📋 LATEST VERSION INFO:', { latestVersion, error: versionError });
+
+                const versionNumber = latestVersion?.edition_number || 'Latest';
+                const uploadDate = latestVersion?.upload_date ? new Date(latestVersion.upload_date).toLocaleDateString() : 'Today';
+                const versionNotes = latestVersion?.notes ? `<p><strong>Version Notes:</strong> ${latestVersion.notes}</p>` : '';
+                const versionLink = latestVersion?.link || null;
+
                 // Create email targets with HTML templates
                 const emailTargets = users.map(user => ({
                     to: user.email,
-                    subject: `🔔 New Version Available: ${reportName}`,
-                    html: createVersionEmailHTML(user.full_name, reportName)
+                    subject: `🔔 New Version Available: ${reportName} (v${versionNumber})`,
+                    html: createVersionEmailHTML(user.full_name, reportName, versionNumber, uploadDate, versionNotes, versionLink)
                 }));
                 
                 console.log('📧 EMAIL TARGETS CREATED:', emailTargets.length);
@@ -182,8 +198,8 @@
             })) || [];
         };
 
-        // EMAIL TEMPLATES
-        const createVersionEmailHTML = (userName, reportName) => `
+        // EMAIL TEMPLATES WITH VERSION LINK BUTTONS
+        const createVersionEmailHTML = (userName, reportName, versionNumber, uploadDate, versionNotes, versionLink) => `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #f9fafb; padding: 20px;">
                 <div style="background: white; border-radius: 8px; padding: 30px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                     <div style="text-align: center; border-bottom: 2px solid #e5e7eb; padding-bottom: 20px; margin-bottom: 25px;">
@@ -194,8 +210,9 @@
                         <h2 style="color: #2563eb; margin: 0 0 15px 0; font-size: 20px;">${reportName}</h2>
                         <p style="color: #374151; margin: 0 0 10px 0; font-size: 16px;">Hello ${userName},</p>
                         <p style="color: #374151; margin: 0 0 15px 0; line-height: 1.5;">
-                            Great news! A new version of the report you follow has been published and is now available for you to view.
+                            Great news! A new version (<strong>Version ${versionNumber || 'Latest'}</strong>) of the report you follow has been published on ${uploadDate || 'today'}.
                         </p>
+                        ${versionNotes || ''}
                     </div>
                     <div style="background: #eff6ff; border: 1px solid #dbeafe; border-radius: 6px; padding: 20px; margin: 20px 0;">
                         <h3 style="color: #1e40af; margin: 0 0 10px 0; font-size: 16px;">📋 What you can do:</h3>
@@ -207,13 +224,24 @@
                         </ul>
                     </div>
                     <div style="text-align: center; margin: 30px 0;">
+                        ${versionLink ? `
+                            <a href="${versionLink}" 
+                               style="background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; font-size: 16px; margin: 0 10px 10px 0;">
+                                🔗 View New Version
+                            </a>
+                        ` : ''}
                         <a href="https://repodirectory.netlify.app/" 
-                           style="background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; font-size: 16px;">
-                            📖 View New Version
+                           style="background: linear-gradient(135deg, #059669 0%, #047857 100%); color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; font-size: 16px; margin: 0 10px 10px 0;">
+                            📋 View All Reports
                         </a>
                     </div>
+                    <div style="background: #f0f9ff; border-left: 4px solid #0ea5e9; padding: 15px; margin: 20px 0;">
+                        <p style="margin: 0; color: #0c4a6e; font-size: 14px;">
+                            💡 <strong>Tip:</strong> Click "View Versions" in the report card to see all available versions and their release dates.
+                        </p>
+                    </div>
                     <div style="text-align: center; border-top: 1px solid #e5e7eb; padding-top: 20px; margin-top: 30px;">
-                        <p style="color: #6b7280; font-size: 12px; margin: 0;">
+                        <p style="color: #6b7280; font-size: 12px; margin: 0 0 5px 0;">
                             You're receiving this because you have view access to this report.
                         </p>
                     </div>
