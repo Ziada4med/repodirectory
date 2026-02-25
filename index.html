@@ -145,7 +145,7 @@
                 // Get latest version info
                 const { data: latestVersion, error: versionError } = await supabase
                     .from('report_editions')
-                    .select('edition_number, upload_date, notes, link')
+                    .select('edition_number, upload_date, notes, version_link')
                     .eq('report_id', reportId)
                     .order('upload_date', { ascending: false })
                     .limit(1)
@@ -156,7 +156,7 @@
                 const versionNumber = latestVersion?.edition_number || 'Latest';
                 const uploadDate = latestVersion?.upload_date ? new Date(latestVersion.upload_date).toLocaleDateString() : 'Today';
                 const versionNotes = latestVersion?.notes ? `<p><strong>Version Notes:</strong> ${latestVersion.notes}</p>` : '';
-                const versionLink = latestVersion?.link || null;
+                const versionLink = latestVersion?.version_link || null;
 
                 // Create email targets with HTML templates
                 const emailTargets = users.map(user => ({
