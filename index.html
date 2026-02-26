@@ -997,13 +997,6 @@
                                                 <i className="fas fa-plus"></i>
                                                 Add Report
                                             </button>
-                                            <button
-                                                onClick={() => window.testEmailSystem()}
-                                                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors"
-                                            >
-                                                <i className="fas fa-envelope"></i>
-                                                Test Email
-                                            </button>
                                         </>
                                     )}
                                     <button
@@ -1171,6 +1164,9 @@
             const [showEditions, setShowEditions] = useState(false);
             const [showAddEdition, setShowAddEdition] = useState(false);
             const [editingVersion, setEditingVersion] = useState(null);
+            const [showViewers, setShowViewers] = useState(false);
+            const [viewers, setViewers] = useState([]);
+            const [loadingViewers, setLoadingViewers] = useState(false);
 
             const isAdmin = user.role === 'Admin';
 
@@ -1253,6 +1249,38 @@
                 return colors[frequency] || 'bg-gray-100 text-gray-800';
             };
 
+            const fetchViewers = async () => {
+                if (!showViewers || loadingViewers) return;
+                setLoadingViewers(true);
+                try {
+                    const { data: permissions, error: permError } = await supabase
+                        .from('user_report_permissions')
+                        .select('user_id, app_users (full_name, email, role)')
+                        .eq('report_id', report.id);
+                    
+                    if (permError) {
+                        console.error('Error fetching viewers:', permError);
+                        setViewers([]);
+                        return;
+                    }
+                    
+                    const viewersList = permissions?.map(p => p.app_users) || [];
+                    setViewers(viewersList);
+                    console.log(`👥 Found ${viewersList.length} users with access to ${report.name}`);
+                } catch (error) {
+                    console.error('Error fetching viewers:', error);
+                    setViewers([]);
+                } finally {
+                    setLoadingViewers(false);
+                }
+            };
+
+            React.useEffect(() => {
+                if (showViewers) {
+                    fetchViewers();
+                }
+            }, [showViewers]);
+
             const latestEdition = report.report_editions?.length > 0 
                 ? report.report_editions.sort((a, b) => new Date(b.upload_date) - new Date(a.upload_date))[0]
                 : null;
@@ -1320,13 +1348,23 @@
                                 {showEditions ? 'Hide' : 'View'} Versions ({report.report_editions?.length || 0})
                             </button>
                             {isAdmin && (
-                                <button
-                                    onClick={() => setShowAddEdition(true)}
-                                    className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm transition-colors"
-                                >
-                                    <i className="fas fa-cog mr-1"></i>
-                                    Manage
-                                </button>
+                                <>
+                                    <button
+                                        onClick={() => setShowViewers(!showViewers)}
+                                        className="bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg text-sm transition-colors"
+                                        title="View who has access to this report"
+                                    >
+                                        <i className="fas fa-users mr-1"></i>
+                                        Access
+                                    </button>
+                                    <button
+                                        onClick={() => setShowAddEdition(true)}
+                                        className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm transition-colors"
+                                    >
+                                        <i className="fas fa-cog mr-1"></i>
+                                        Manage
+                                    </button>
+                                </>
                             )}
                         </div>
                     </div>
@@ -1490,6 +1528,39 @@
                                 </div>
                             ) : (
                                 <p className="text-gray-500 text-sm">No versions available</p>
+                            )}
+                        </div>
+                    )}
+
+                    {showViewers && isAdmin && (
+                        <div className="border-t bg-gray-50 p-4">
+                            <h4 className="font-medium text-gray-900 mb-3">Report Access</h4>
+                            {loadingViewers ? (
+                                <div className="text-center py-4">
+                                    <i className="fas fa-spinner fa-spin text-gray-400"></i>
+                                    <p className="text-gray-500 text-sm mt-2">Loading users...</p>
+                                </div>
+                            ) : viewers.length > 0 ? (
+                                <div className="space-y-2 max-h-48 overflow-y-auto">
+                                    {viewers.map((viewer, index) => (
+                                        <div key={index} className="flex items-center justify-between p-3 bg-white rounded-lg border">
+                                            <div>
+                                                <p className="font-medium text-gray-900">{viewer.full_name}</p>
+                                                <p className="text-sm text-gray-600">{viewer.email}</p>
+                                            </div>
+                                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                                viewer.role === 'Admin' ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'
+                                            }`}>
+                                                {viewer.role}
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="text-center py-4">
+                                    <i className="fas fa-users text-4xl text-gray-300 mb-2"></i>
+                                    <p className="text-gray-500 text-sm">No users have access to this report yet</p>
+                                </div>
                             )}
                         </div>
                     )}
@@ -2599,10 +2670,10 @@
 
             // Fetch available reports and user's current access
             useEffect(() => {
-                if (user.role === 'Viewer' && showReports) {
+                if (user.role === 'Viewer') {
                     fetchReportsAndAccess();
                 }
-            }, [showReports, user.role]);
+            }, [user.role]);
 
             const fetchReportsAndAccess = async () => {
                 setLoading(true);
