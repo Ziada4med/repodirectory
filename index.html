@@ -1251,24 +1251,76 @@
 
             const fetchViewers = async () => {
                 if (!showViewers || loadingViewers) return;
+                
                 setLoadingViewers(true);
                 try {
-                    const { data: permissions, error: permError } = await supabase
+                    console.log(`🔍 Fetching viewers for report: ${report.name} (ID: ${report.id})`);
+                    
+                    // First, try the nested query
+                    let { data: permissions, error: permError } = await supabase
                         .from('user_report_permissions')
-                        .select('user_id, app_users (full_name, email, role)')
+                        .select(`
+                            user_id,
+                            app_users (
+                                full_name,
+                                email,
+                                role
+                            )
+                        `)
                         .eq('report_id', report.id);
                     
-                    if (permError) {
-                        console.error('Error fetching viewers:', permError);
+                    console.log('🔍 Raw permissions data:', permissions);
+                    console.log('🔍 Permission error:', permError);
+                    
+                    // If nested query fails, use separate queries
+                    if (permError || !permissions) {
+                        console.log('🔄 Nested query failed, trying separate queries...');
+                        
+                        // Get permission records first
+                        const { data: permissionsList, error: permListError } = await supabase
+                            .from('user_report_permissions')
+                            .select('user_id')
+                            .eq('report_id', report.id);
+                        
+                        if (permListError || !permissionsList || permissionsList.length === 0) {
+                            console.log('⚠️ No permissions found for this report');
+                            setViewers([]);
+                            return;
+                        }
+                        
+                        // Get user details separately
+                        const userIds = permissionsList.map(p => p.user_id);
+                        const { data: users, error: usersError } = await supabase
+                            .from('app_users')
+                            .select('full_name, email, role')
+                            .in('id', userIds);
+                        
+                        if (usersError || !users) {
+                            console.error('❌ Error fetching users:', usersError);
+                            setViewers([]);
+                            return;
+                        }
+                        
+                        console.log(`👥 Found ${users.length} users with access to ${report.name}:`, users);
+                        setViewers(users);
+                        return;
+                    }
+                    
+                    if (!permissions || permissions.length === 0) {
+                        console.log('⚠️ No permissions found for this report');
                         setViewers([]);
                         return;
                     }
                     
-                    const viewersList = permissions?.map(p => p.app_users) || [];
+                    const viewersList = permissions
+                        .map(p => p.app_users)
+                        .filter(user => user !== null); // Remove null entries
+                    
+                    console.log(`👥 Found ${viewersList.length} users with access to ${report.name}:`, viewersList);
                     setViewers(viewersList);
-                    console.log(`👥 Found ${viewersList.length} users with access to ${report.name}`);
+                    
                 } catch (error) {
-                    console.error('Error fetching viewers:', error);
+                    console.error('💥 Error fetching viewers:', error);
                     setViewers([]);
                 } finally {
                     setLoadingViewers(false);
