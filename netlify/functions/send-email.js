@@ -60,7 +60,7 @@ exports.handler = async (event, context) => {
             body: JSON.stringify({
               sender: {
                 name: 'Procurement Reports',
-                email: 'proc.prism@gmail.com'
+                email: 'ziad.ahmed@nesmapartners.com'
               },
               to: [{
                 email: emailData.to
