@@ -1,4 +1,6 @@
-// netlify/functions/send-email.js - Brevo Version
+// netlify/functions/send-email.js - Gmail SMTP Version
+const nodemailer = require('nodemailer');
+
 exports.handler = async (event, context) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
@@ -29,64 +31,52 @@ exports.handler = async (event, context) => {
       };
     }
 
-    // Get Brevo API key from environment variables
-    const BREVO_API_KEY = process.env.BREVO_API_KEY;
+    // Get Gmail credentials from environment variables
+    const GMAIL_USER = process.env.GMAIL_USER;
+    const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD;
 
-    if (!BREVO_API_KEY) {
-      console.error('❌ Brevo API key not found in environment variables');
+    if (!GMAIL_USER || !GMAIL_APP_PASSWORD) {
+      console.error('❌ Gmail credentials not found in environment variables');
       return {
         statusCode: 500,
         headers,
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           success: false,
-          error: 'Brevo API key not configured. Please add BREVO_API_KEY to environment variables.' 
+          error: 'Gmail credentials not configured. Please add GMAIL_USER and GMAIL_APP_PASSWORD to environment variables.'
         })
       };
     }
 
-    console.log(`📧 Processing ${emails.length} emails via Brevo...`);
+    // Create Gmail SMTP transporter
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: GMAIL_USER,
+        pass: GMAIL_APP_PASSWORD
+      }
+    });
+
+    console.log(`📧 Processing ${emails.length} emails via Gmail SMTP...`);
 
     const results = await Promise.all(
       emails.map(async (emailData, index) => {
         try {
           console.log(`📤 Sending email ${index + 1}/${emails.length} to: ${emailData.to}`);
-          
-          const response = await fetch('https://api.brevo.com/v3/smtp/email', {
-            method: 'POST',
-            headers: {
-              'api-key': BREVO_API_KEY,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              sender: {
-                name: 'Procurement Reports',
-                email: 'ziad.ahmed@nesmapartners.com'
-              },
-              to: [{
-                email: emailData.to
-              }],
-              subject: emailData.subject,
-              htmlContent: emailData.html
-            })
+
+          const info = await transporter.sendMail({
+            from: `"Procurement Reports" <${GMAIL_USER}>`,
+            to: emailData.to,
+            subject: emailData.subject,
+            html: emailData.html
           });
 
-          if (response.status === 201) { // Brevo success status
-            const result = await response.json();
-            console.log(`✅ Email ${index + 1} sent successfully to ${emailData.to}`);
-            return {
-              success: true,
-              email: emailData.to,
-              messageId: result.messageId || 'sent'
-            };
-          } else {
-            const errorText = await response.text();
-            console.error(`❌ Email ${index + 1} failed for ${emailData.to}:`, errorText);
-            return {
-              success: false,
-              email: emailData.to,
-              error: errorText || 'Brevo API error'
-            };
-          }
+          console.log(`✅ Email ${index + 1} sent successfully to ${emailData.to} — MessageId: ${info.messageId}`);
+          return {
+            success: true,
+            email: emailData.to,
+            messageId: info.messageId
+          };
+
         } catch (emailError) {
           console.error(`💥 Email ${index + 1} crashed for ${emailData.to}:`, emailError);
           return {
@@ -101,7 +91,7 @@ exports.handler = async (event, context) => {
     const successCount = results.filter(r => r.success).length;
     const failureCount = results.filter(r => !r.success).length;
 
-    console.log(`🎉 BREVO SUMMARY: ${successCount} successful, ${failureCount} failed`);
+    console.log(`🎉 GMAIL SUMMARY: ${successCount} successful, ${failureCount} failed`);
 
     return {
       statusCode: 200,
@@ -119,12 +109,12 @@ exports.handler = async (event, context) => {
     };
 
   } catch (error) {
-    console.error('💥 BREVO FUNCTION ERROR:', error);
+    console.error('💥 GMAIL FUNCTION ERROR:', error);
     return {
       statusCode: 500,
       headers,
-      body: JSON.stringify({ 
-        success: false, 
+      body: JSON.stringify({
+        success: false,
         error: error.message,
         details: 'Check Netlify function logs for more details'
       })
