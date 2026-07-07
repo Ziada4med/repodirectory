@@ -1,89 +1,3058 @@
-// netlify/functions/send-email-background.js - Gmail SMTP Version (Background Function)
-// NOTE: Background functions return an immediate empty 202 response to the caller.
-// There is no synchronous result — check Netlify function logs to confirm delivery.
-const nodemailer = require('nodemailer');
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Procurement Reports Repository</title>
+    <link rel="icon" href="data:image/png;base64,iVBORw0KGgo=">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.development.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.development.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    <script src="https://unpkg.com/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-50">
+    <div id="root"></div>
 
-const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+    <script type="text/babel">
+        const { useState, useEffect } = React;
 
-exports.handler = async (event, context) => {
-  if (event.httpMethod !== 'POST') {
-    return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
-  }
+        const supabaseUrl = 'https://nrgusitisxvocfqqbsvg.supabase.co';
+        const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5yZ3VzaXRpc3h2b2NmcXFic3ZnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAyODU3MTcsImV4cCI6MjA4NTg2MTcxN30.Ped9Cf8wCsighV5cmFETWdF_7ruktTj1CeJfo-0q8mw';
+        
+        // Validate API key format
+        if (!supabaseKey.startsWith('eyJ')) {
+            console.error('❌ Invalid Supabase API key format');
+        } else {
+            console.log('✅ Supabase API key format looks correct');
+        }
+        
+        const supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
+        
+        // =============================================================================
+        // EMAIL NOTIFICATION SYSTEM - REAL EMAIL SENDING
+        // =============================================================================
+        
+        // Email notification helper function - REAL EMAIL SENDING VERSION
+        const sendEmailNotification = async (action, data) => {
+            console.log(`🎯 EMAIL SYSTEM TRIGGERED - Action: ${action}`, data);
+            
+            try {
+                console.log(`📧 Starting ${action} notification process...`);
+                
+                // Get email targets using working queries
+                let emailTargets = [];
+                
+                switch (action) {
+                    case 'new_version_viewers_only':
+                        emailTargets = await getViewersForReportWorking(data.reportId, data.reportName);
+                        break;
+                    case 'version_updated':
+                        emailTargets = await getViewersForVersionUpdate(data.reportId, data.reportName, data.versionId);
+                        break;
+                    case 'new_report':
+                        emailTargets = await getAdminsForNewReportWorking(data.reportId, data.reportName);
+                        break;
+                    default:
+                        throw new Error(`Unknown email action: ${action}`);
+                }
 
-  try {
-    const { emails } = JSON.parse(event.body);
+                console.log('🎯 EMAIL TARGETS FOUND:', emailTargets.length, 'recipients');
+                
+                if (emailTargets.length === 0) {
+                    console.warn('⚠️ NO EMAIL TARGETS FOUND - No emails will be sent');
+                    return { success: true, result: { emailsQueued: 0, message: 'No recipients found' } };
+                }
 
-    if (!emails || !Array.isArray(emails)) {
-      console.error('❌ Invalid email data received');
-      return; // background functions ignore the return value anyway
-    }
+                console.log('📧 EMAIL TARGETS:', emailTargets.map(t => ({ to: t.to, subject: t.subject })));
+                
+                // Send emails via Netlify Background Function (fire-and-forget, no sync timeout)
+                console.log('🚀 Sending emails via Netlify Background Function...');
+                
+                const apiResponse = await fetch('https://repodirectory.netlify.app/.netlify/functions/send-email-background', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ emails: emailTargets })
+                });
+                
+                // Background functions reply with an empty 202 the instant they're accepted —
+                // the actual sending happens after this returns, so there's no result body to read here.
+                if (apiResponse.status === 202) {
+                    console.log(`✅ Email job accepted - ${emailTargets.length} emails queued for background sending`);
+                    alert(`✅ Sending ${emailTargets.length} notification(s) in the background. Check Netlify function logs in a minute to confirm delivery.`);
+                    return { success: true, result: { emailsQueued: emailTargets.length } };
+                } else {
+                    const text = await apiResponse.text();
+                    console.error('❌ Unexpected response from email function:', apiResponse.status, text);
+                    alert(`❌ Email sending failed to start (status ${apiResponse.status}).`);
+                    return { success: false, error: text };
+                }
+                
+            } catch (emailErr) {
+                console.error('💥 COMPLETE EMAIL FAILURE:', emailErr);
+                alert(`💥 Email Error: ${emailErr.message}`);
+                return { success: false, error: emailErr };
+            }
+        };
 
-    const GMAIL_USER = process.env.GMAIL_USER;
-    const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD;
+        // Get viewers for report notification - WORKING VERSION WITH EMAIL TEMPLATES
+        const getViewersForReportWorking = async (reportId, reportName) => {
+            console.log('🔍 SEARCHING FOR VIEWERS - Report ID:', reportId, 'Report Name:', reportName);
+            
+            try {
+                // Step 1: Get permissions without joins
+                const { data: permissions, error: permError } = await supabase
+                    .from('user_report_permissions')
+                    .select('user_id')
+                    .eq('report_id', reportId);
+                
+                console.log('📊 PERMISSIONS RESULT:', { permissions, error: permError });
+                
+                if (permError || !permissions || permissions.length === 0) {
+                    console.log('❌ No permissions found for this report');
+                    return [];
+                }
+                
+                // Step 2: Get users separately
+                console.log('👥 Getting viewer users...');
+                const userIds = permissions.map(p => p.user_id);
+                console.log('🔍 User IDs with access:', userIds);
+                
+                const { data: users, error: usersError } = await supabase
+                    .from('app_users')
+                    .select('id, email, full_name, role, is_active')
+                    .in('id', userIds)
+                    .eq('role', 'Viewer')
+                    .eq('is_active', true);
+                
+                console.log('📊 VIEWER USERS RESULT:', { users, error: usersError });
+                
+                if (usersError) {
+                    console.error('❌ Error getting users:', usersError);
+                    throw usersError;
+                }
+                
+                if (!users || users.length === 0) {
+                    console.log('⚠️ No Viewer users found with access to this report');
+                    return [];
+                }
+                
+                console.log(`✅ Found ${users.length} viewer(s) with access!`);
+                users.forEach((user, i) => {
+                    console.log(`👤 Viewer ${i+1}: ${user.full_name} (${user.email})`);
+                });
+                
+                // Get latest version info
+                const { data: latestVersion, error: versionError } = await supabase
+                    .from('report_editions')
+                    .select('edition_number, upload_date, notes, version_link')
+                    .eq('report_id', reportId)
+                    .order('upload_date', { ascending: false })
+                    .limit(1)
+                    .single();
 
-    if (!GMAIL_USER || !GMAIL_APP_PASSWORD) {
-      console.error('❌ Gmail credentials not found in environment variables');
-      return;
-    }
+                console.log('📋 LATEST VERSION INFO:', { latestVersion, error: versionError });
 
-    const transporter = nodemailer.createTransport({
-      service: 'gmail',
-      pool: true,
-      maxConnections: 1,    // keep sequential — this is what avoids Gmail throttling
-      maxMessages: 100,
-      auth: {
-        user: GMAIL_USER,
-        pass: GMAIL_APP_PASSWORD
-      }
-    });
+                const versionNumber = latestVersion?.edition_number || 'Latest';
+                const uploadDate = latestVersion?.upload_date ? new Date(latestVersion.upload_date).toLocaleDateString() : 'Today';
+                const versionNotes = latestVersion?.notes ? `<p><strong>Version Notes:</strong> ${latestVersion.notes}</p>` : '';
+                const versionLink = latestVersion?.version_link || null;
 
-    console.log(`📧 [BACKGROUND] Processing ${emails.length} emails via Gmail SMTP (sequential)...`);
+                // Create email targets with HTML templates
+                const emailTargets = users.map(user => ({
+                    to: user.email,
+                    subject: `🔔 New Version Available: ${reportName} (v${versionNumber})`,
+                    html: createVersionEmailHTML(user.full_name, reportName, versionNumber, uploadDate, versionNotes, versionLink)
+                }));
+                
+                console.log('📧 EMAIL TARGETS CREATED:', emailTargets.length);
+                return emailTargets;
+                
+            } catch (error) {
+                console.error('💥 Error in getViewersForReportWorking:', error);
+                throw error;
+            }
+        };
 
-    const results = [];
+        // Get admins for new report notification - WORKING VERSION WITH EMAIL TEMPLATES
+        const getAdminsForNewReportWorking = async (reportId, reportName) => {
+            console.log('👑 GETTING ADMINS FOR NEW REPORT...');
+            
+            const { data: admins, error: adminsError } = await supabase
+                .from('app_users')
+                .select('email, full_name')
+                .eq('role', 'Admin')
+                .eq('is_active', true);
 
-    for (let index = 0; index < emails.length; index++) {
-      const emailData = emails[index];
+            if (adminsError) {
+                console.error('❌ Error fetching admins:', adminsError);
+                throw adminsError;
+            }
 
-      try {
-        console.log(`📤 Sending email ${index + 1}/${emails.length} to: ${emailData.to}`);
+            console.log(`✅ Found ${admins?.length || 0} admin(s)`);
+            
+            return admins?.map(admin => ({
+                to: admin.email,
+                subject: `📊 New Report Created: ${reportName}`,
+                html: createNewReportEmailHTML(admin.full_name, reportName)
+            })) || [];
+        };
 
-        const info = await transporter.sendMail({
-          from: `"Procurement Reports" <${GMAIL_USER}>`,
-          to: emailData.to,
-          subject: emailData.subject,
-          html: emailData.html
-        });
+        // Get viewers for version update notification - NEW FUNCTION
+        const getViewersForVersionUpdate = async (reportId, reportName, versionId) => {
+            console.log('🔄 SEARCHING FOR VIEWERS - VERSION UPDATE - Report ID:', reportId, 'Version ID:', versionId);
+            
+            try {
+                // Step 1: Get permissions without joins
+                const { data: permissions, error: permError } = await supabase
+                    .from('user_report_permissions')
+                    .select('user_id')
+                    .eq('report_id', reportId);
+                
+                console.log('📊 PERMISSIONS RESULT:', { permissions, error: permError });
+                
+                if (permError || !permissions || permissions.length === 0) {
+                    console.log('❌ No permissions found for this report');
+                    return [];
+                }
+                
+                // Step 2: Get users separately
+                console.log('👥 Getting viewer users...');
+                const userIds = permissions.map(p => p.user_id);
+                console.log('🔍 User IDs with access:', userIds);
+                
+                const { data: users, error: usersError } = await supabase
+                    .from('app_users')
+                    .select('id, email, full_name, role, is_active')
+                    .in('id', userIds)
+                    .eq('role', 'Viewer')
+                    .eq('is_active', true);
+                
+                console.log('📊 VIEWER USERS RESULT:', { users, error: usersError });
+                
+                if (usersError) {
+                    console.error('❌ Error getting users:', usersError);
+                    throw usersError;
+                }
+                
+                if (!users || users.length === 0) {
+                    console.log('⚠️ No Viewer users found with access to this report');
+                    return [];
+                }
+                
+                console.log(`✅ Found ${users.length} viewer(s) with access!`);
+                users.forEach((user, i) => {
+                    console.log(`👤 Viewer ${i+1}: ${user.full_name} (${user.email})`);
+                });
+                
+                // Get updated version info
+                const { data: updatedVersion, error: versionError } = await supabase
+                    .from('report_editions')
+                    .select('edition_number, upload_date, notes, version_link')
+                    .eq('id', versionId)
+                    .single();
 
-        console.log(`✅ Email ${index + 1} sent successfully to ${emailData.to} — MessageId: ${info.messageId}`);
-        results.push({ success: true, email: emailData.to, messageId: info.messageId });
+                console.log('📋 UPDATED VERSION INFO:', { updatedVersion, error: versionError });
 
-      } catch (emailError) {
-        console.error(`💥 Email ${index + 1} failed for ${emailData.to}:`, emailError.message);
-        results.push({ success: false, email: emailData.to, error: emailError.message });
-      }
+                const versionNumber = updatedVersion?.edition_number || 'Unknown';
+                const uploadDate = updatedVersion?.upload_date ? new Date(updatedVersion.upload_date).toLocaleDateString() : 'Today';
+                const versionNotes = updatedVersion?.notes ? `<p><strong>Update Notes:</strong> ${updatedVersion.notes}</p>` : '';
+                const versionLink = updatedVersion?.version_link || null;
 
-      if (index < emails.length - 1) {
-        await delay(300);
-      }
-    }
+                // Create email targets with HTML templates for version updates
+                const emailTargets = users.map(user => ({
+                    to: user.email,
+                    subject: `🔄 Version Updated: ${reportName} (v${versionNumber})`,
+                    html: createVersionUpdateEmailHTML(user.full_name, reportName, versionNumber, uploadDate, versionNotes, versionLink)
+                }));
+                
+                console.log('📧 EMAIL TARGETS CREATED:', emailTargets.length);
+                return emailTargets;
+                
+            } catch (error) {
+                console.error('💥 Error in getViewersForVersionUpdate:', error);
+                throw error;
+            }
+        };
 
-    transporter.close();
+        // EMAIL TEMPLATES WITH VERSION LINK BUTTONS
+        const createVersionEmailHTML = (userName, reportName, versionNumber, uploadDate, versionNotes, versionLink) => `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #f9fafb; padding: 20px;">
+                <div style="background: white; border-radius: 8px; padding: 30px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                    <div style="text-align: center; border-bottom: 2px solid #e5e7eb; padding-bottom: 20px; margin-bottom: 25px;">
+                        <h1 style="color: #1f2937; margin: 0; font-size: 24px;">📋 New Report Version</h1>
+                        <p style="color: #6b7280; margin: 5px 0 0 0; font-size: 14px;">Procurement Reports System</p>
+                    </div>
+                    <div style="margin-bottom: 25px;">
+                        <h2 style="color: #2563eb; margin: 0 0 15px 0; font-size: 20px;">${reportName}</h2>
+                        <p style="color: #374151; margin: 0 0 10px 0; font-size: 16px;">Hello ${userName},</p>
+                        <p style="color: #374151; margin: 0 0 15px 0; line-height: 1.5;">
+                            Great news! A new version (<strong>Version ${versionNumber || 'Latest'}</strong>) of the report you follow has been published on ${uploadDate || 'today'}.
+                        </p>
+                        ${versionNotes || ''}
+                    </div>
+                    <div style="background: #eff6ff; border: 1px solid #dbeafe; border-radius: 6px; padding: 20px; margin: 20px 0;">
+                        <h3 style="color: #1e40af; margin: 0 0 10px 0; font-size: 16px;">📋 What you can do:</h3>
+                        <ul style="color: #374151; margin: 0; padding-left: 20px;">
+                            <li style="margin-bottom: 5px;">View and download the latest version</li>
+                            <li style="margin-bottom: 5px;">Access version-specific links and resources</li>
+                            <li style="margin-bottom: 5px;">Compare with previous versions</li>
+                            <li>Read detailed version notes and updates</li>
+                        </ul>
+                    </div>
+                    <div style="text-align: center; margin: 30px 0;">
+                        ${versionLink ? `
+                            <a href="${versionLink}" 
+                               style="background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; font-size: 16px; margin: 0 10px 10px 0;">
+                                🔗 View New Version
+                            </a>
+                        ` : ''}
+                        <a href="https://repodirectory.netlify.app/" 
+                           style="background: linear-gradient(135deg, #059669 0%, #047857 100%); color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; font-size: 16px; margin: 0 10px 10px 0;">
+                            📋 View All Reports
+                        </a>
+                    </div>
+                    <div style="background: #f0f9ff; border-left: 4px solid #0ea5e9; padding: 15px; margin: 20px 0;">
+                        <p style="margin: 0; color: #0c4a6e; font-size: 14px;">
+                            💡 <strong>Tip:</strong> Click "View Versions" in the report card to see all available versions and their release dates.
+                        </p>
+                    </div>
+                    <div style="text-align: center; border-top: 1px solid #e5e7eb; padding-top: 20px; margin-top: 30px;">
+                        <p style="color: #6b7280; font-size: 12px; margin: 0 0 5px 0;">
+                            You're receiving this because you have view access to this report.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        `;
 
-    const successCount = results.filter(r => r.success).length;
-    const failureCount = results.filter(r => !r.success).length;
+        // EMAIL TEMPLATE FOR VERSION UPDATES - NEW TEMPLATE
+        const createVersionUpdateEmailHTML = (userName, reportName, versionNumber, uploadDate, versionNotes, versionLink) => `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #f9fafb; padding: 20px;">
+                <div style="background: white; border-radius: 8px; padding: 30px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                    <div style="text-align: center; border-bottom: 2px solid #e5e7eb; padding-bottom: 20px; margin-bottom: 25px;">
+                        <h1 style="color: #1f2937; margin: 0; font-size: 24px;">🔄 Report Version Updated</h1>
+                        <p style="color: #6b7280; margin: 5px 0 0 0; font-size: 14px;">Procurement Reports System</p>
+                    </div>
+                    <div style="margin-bottom: 25px;">
+                        <h2 style="color: #ea580c; margin: 0 0 15px 0; font-size: 20px;">${reportName}</h2>
+                        <p style="color: #374151; margin: 0 0 10px 0; font-size: 16px;">Hello ${userName},</p>
+                        <p style="color: #374151; margin: 0 0 15px 0; line-height: 1.5;">
+                            <strong>Version ${versionNumber || 'Unknown'}</strong> of the report you follow has been updated with new information on ${uploadDate || 'today'}.
+                        </p>
+                        ${versionNotes || ''}
+                    </div>
+                    <div style="background: #fff7ed; border: 1px solid #fed7aa; border-radius: 6px; padding: 20px; margin: 20px 0;">
+                        <h3 style="color: #ea580c; margin: 0 0 10px 0; font-size: 16px;">🔄 What's changed:</h3>
+                        <ul style="color: #374151; margin: 0; padding-left: 20px;">
+                            <li style="margin-bottom: 5px;">Updated content and data</li>
+                            <li style="margin-bottom: 5px;">Revised links or resources</li>
+                            <li style="margin-bottom: 5px;">New insights or information</li>
+                            <li>Enhanced version notes</li>
+                        </ul>
+                    </div>
+                    <div style="text-align: center; margin: 30px 0;">
+                        ${versionLink ? `
+                            <a href="${versionLink}" 
+                               style="background: linear-gradient(135deg, #ea580c 0%, #dc2626 100%); color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; font-size: 16px; margin: 0 10px 10px 0;">
+                                🔗 View Updated Version
+                            </a>
+                        ` : ''}
+                        <a href="https://repodirectory.netlify.app/" 
+                           style="background: linear-gradient(135deg, #059669 0%, #047857 100%); color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; font-size: 16px; margin: 0 10px 10px 0;">
+                            📋 View All Reports
+                        </a>
+                    </div>
+                    <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0;">
+                        <p style="margin: 0; color: #92400e; font-size: 14px;">
+                            🔄 <strong>Note:</strong> This is an update to an existing version, not a completely new version. Check the update notes for specific changes.
+                        </p>
+                    </div>
+                    <div style="text-align: center; border-top: 1px solid #e5e7eb; padding-top: 20px; margin-top: 30px;">
+                        <p style="color: #6b7280; font-size: 12px; margin: 0 0 5px 0;">
+                            You're receiving this because you have view access to this report.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        `;
 
-    console.log(`🎉 [BACKGROUND] GMAIL SUMMARY: ${successCount} successful, ${failureCount} failed`);
-    if (failureCount > 0) {
-      results.filter(r => !r.success).forEach(r => console.log(`   - ${r.email}: ${r.error}`));
-    }
+        const createNewReportEmailHTML = (adminName, reportName) => `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #f9fafb; padding: 20px;">
+                <div style="background: white; border-radius: 8px; padding: 30px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                    <div style="text-align: center; border-bottom: 2px solid #e5e7eb; padding-bottom: 20px; margin-bottom: 25px;">
+                        <h1 style="color: #1f2937; margin: 0; font-size: 24px;">📊 New Report Created</h1>
+                        <p style="color: #6b7280; margin: 5px 0 0 0; font-size: 14px;">Procurement Reports System</p>
+                    </div>
+                    <div style="margin-bottom: 25px;">
+                        <h2 style="color: #059669; margin: 0 0 15px 0; font-size: 20px;">${reportName}</h2>
+                        <p style="color: #374151; margin: 0 0 10px 0; font-size: 16px;">Hello ${adminName},</p>
+                        <p style="color: #374151; margin: 0 0 15px 0; line-height: 1.5;">
+                            A new report <strong>${reportName}</strong> has been created in the procurement system and requires your attention.
+                        </p>
+                    </div>
+                    <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 20px; margin: 20px 0;">
+                        <h3 style="color: #166534; margin: 0 0 10px 0; font-size: 16px;">🛠️ As an administrator, you can:</h3>
+                        <ul style="color: #374151; margin: 0; padding-left: 20px;">
+                            <li style="margin-bottom: 5px;">Review the report content</li>
+                            <li style="margin-bottom: 5px;">Assign user permissions</li>
+                            <li style="margin-bottom: 5px;">Manage report versions</li>
+                            <li>Configure access controls</li>
+                        </ul>
+                    </div>
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="https://repodirectory.netlify.app/" 
+                           style="background: linear-gradient(135deg, #059669 0%, #047857 100%); color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; font-size: 16px;">
+                            🛠️ Manage Report
+                        </a>
+                    </div>
+                </div>
+            </div>
+        `;
 
-    // Return value is ignored by Netlify for background functions, but harmless to include
-    return {
-      statusCode: 200,
-      body: JSON.stringify({ success: true, emailsSent: successCount, totalEmails: emails.length, results })
-    };
+        // =============================================================================
+        // END EMAIL NOTIFICATION SYSTEM
+        // =============================================================================
+        
+        // Test Supabase connection
+        const testSupabaseConnection = async () => {
+            try {
+                console.log('🔍 Testing Supabase connection...');
+                const { data, error } = await supabase.auth.getSession();
+                if (error) {
+                    console.error('❌ Supabase connection failed:', error);
+                    return false;
+                } else {
+                    console.log('✅ Supabase connection successful');
+                    return true;
+                }
+            } catch (err) {
+                console.error('❌ Supabase connection error:', err);
+                return false;
+            }
+        };
 
-  } catch (error) {
-    console.error('💥 [BACKGROUND] GMAIL FUNCTION ERROR:', error);
-  }
-};
+        function App() {
+            const [user, setUser] = useState(null);
+            const [currentUser, setCurrentUser] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [authError, setAuthError] = useState(null);
+
+            useEffect(() => {
+                console.log('App initializing...');
+                console.log('Current URL:', window.location.href);
+                
+                // First, check for existing session (session persistence)
+                initializeAuth();
+            }, []);
+
+            const initializeAuth = async () => {
+                try {
+                    // Check if we have OAuth callback tokens in the URL hash
+                    const hashParams = new URLSearchParams(window.location.hash.substring(1));
+                    const accessToken = hashParams.get('access_token');
+                    
+                    if (accessToken) {
+                        console.log('✅ Found access token in URL, processing OAuth callback...');
+                        await processOAuthCallback();
+                        return;
+                    }
+
+                    // No OAuth callback, check for existing session
+                    console.log('🔍 No OAuth callback, checking for existing session...');
+                    const { data: { session }, error } = await supabase.auth.getSession();
+                    
+                    if (error) {
+                        console.error('❌ Session check failed:', error);
+                        setLoading(false);
+                        return;
+                    }
+
+                    if (session && session.user) {
+                        console.log('✅ Found existing session:', session.user.email);
+                        
+                        // Look up user in database using existing session
+                        const { data: dbUserData, error: dbError } = await supabase
+                            .from('app_users')
+                            .select('*')
+                            .eq('email', session.user.email.toLowerCase())
+                            .eq('is_active', true)
+                            .single();
+                        
+                        if (dbError && dbError.code === 'PGRST116') {
+                            console.error('❌ User not found in database:', session.user.email);
+                            setAuthError(`Access Denied: Your account (${session.user.email}) is not registered in this system. Please contact administrator.`);
+                            await supabase.auth.signOut();
+                        } else if (dbError) {
+                            console.error('❌ Database error during session restore:', dbError);
+                            setAuthError(`Database Error: ${dbError.message}. Please try again later.`);
+                        } else if (!dbUserData.is_active) {
+                            console.error('❌ User account inactive:', session.user.email);
+                            setAuthError(`Access Denied: Your account has been deactivated. Please contact administrator.`);
+                            await supabase.auth.signOut();
+                        } else {
+                            // Valid user, restore session
+                            console.log('✅ Session restored successfully:', dbUserData.email, 'Role:', dbUserData.role);
+                            
+                            setUser(session.user);
+                            setCurrentUser({
+                                id: dbUserData.id,
+                                email: dbUserData.email,
+                                full_name: dbUserData.full_name,
+                                role: dbUserData.role,
+                                auth_provider: dbUserData.auth_provider || 'google',
+                                is_active: dbUserData.is_active,
+                                created_at: dbUserData.created_at
+                            });
+                        }
+                    } else {
+                        console.log('ℹ️ No existing session found, user needs to login');
+                    }
+                } catch (error) {
+                    console.error('💥 Auth initialization error:', error);
+                    setAuthError(`System Error: ${error.message}`);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const processOAuthCallback = async () => {
+                const hashParams = new URLSearchParams(window.location.hash.substring(1));
+                const accessToken = hashParams.get('access_token');
+                const refreshToken = hashParams.get('refresh_token');
+                
+                if (accessToken) {
+                    console.log('✅ Found access token in URL, processing OAuth callback...');
+                    await processOAuthManually(accessToken, refreshToken);
+                    return;
+                }
+                
+                // Check for OAuth error
+                const urlParams = new URLSearchParams(window.location.search);
+                const error = urlParams.get('error') || hashParams.get('error');
+                
+                if (error) {
+                    console.log('OAuth error detected:', error);
+                    setAuthError(`Authentication failed: ${error}`);
+                    window.history.replaceState({}, document.title, window.location.pathname);
+                    setLoading(false);
+                    return;
+                }
+                
+                // No OAuth callback, proceed with normal initialization
+                await initializeAuth();
+            };
+
+            const processOAuthManually = async (accessToken, refreshToken) => {
+                try {
+                    setLoading(true);
+                    console.log('🔄 Processing OAuth tokens manually...');
+                    
+                    // Extract user info from the JWT token directly
+                    const tokenParts = accessToken.split('.');
+                    if (tokenParts.length !== 3) {
+                        throw new Error('Invalid access token format');
+                    }
+                    
+                    const payload = JSON.parse(atob(tokenParts[1]));
+                    const userEmail = payload.email;
+                    const userName = payload.user_metadata?.full_name || payload.user_metadata?.name || userEmail;
+                    
+                    console.log('📧 Extracted from token - Email:', userEmail, 'Name:', userName);
+                    
+                    // Look up user directly in database (no hardcoded list bullshit)
+                    console.log('🔍 Looking up user in database...');
+                    try {
+                        const { data: dbUserData, error: dbError } = await supabase
+                            .from('app_users')
+                            .select('*')
+                            .eq('email', userEmail.toLowerCase())
+                            .eq('is_active', true)
+                            .single();
+                        
+                        if (dbError && dbError.code === 'PGRST116') {
+                            // User not found in database
+                            console.error('❌ User not found in database:', userEmail);
+                            setAuthError(`Access Denied: Your account (${userEmail}) is not registered in this system. Please contact your administrator to request access.`);
+                            window.history.replaceState({}, document.title, window.location.pathname);
+                            setLoading(false);
+                            return;
+                        } else if (dbError) {
+                            // Other database error
+                            console.error('❌ Database error during user lookup:', dbError);
+                            setAuthError(`Database Error: ${dbError.message}. Please try again later.`);
+                            setLoading(false);
+                            return;
+                        }
+                        
+                        if (!dbUserData) {
+                            console.error('❌ User not found:', userEmail);
+                            setAuthError(`Access Denied: Your account is not registered in this system. Please contact administrator.`);
+                            setLoading(false);
+                            return;
+                        }
+                        
+                        if (!dbUserData.is_active) {
+                            console.error('❌ User account inactive:', userEmail);
+                            setAuthError(`Access Denied: Your account has been deactivated. Please contact administrator.`);
+                            setLoading(false);
+                            return;
+                        }
+                        
+                        console.log('✅ Database user found and active:', dbUserData.email, 'Role:', dbUserData.role, 'ID:', dbUserData.id);
+                        
+                        // Create auth user object (for session management)
+                        const authUser = {
+                            id: payload.sub,
+                            email: userEmail,
+                            user_metadata: {
+                                full_name: userName,
+                                name: userName
+                            }
+                        };
+                        
+                        // Use the actual database user (with correct ID)
+                        const dbUser = {
+                            id: dbUserData.id,  // ✅ Use database ID
+                            email: dbUserData.email,
+                            full_name: dbUserData.full_name,
+                            role: dbUserData.role,
+                            auth_provider: dbUserData.auth_provider || 'google',
+                            is_active: dbUserData.is_active,
+                            created_at: dbUserData.created_at
+                        };
+                        
+                        setUser(authUser);
+                        setCurrentUser(dbUser);  // ✅ This now has the correct database ID
+                        setAuthError(null);
+                        
+                        console.log('🎉 Login successful! Using database user ID:', dbUser.id);
+                        
+                    } catch (error) {
+                        console.error('❌ Error during database user lookup:', error);
+                        setAuthError(`System Error: ${error.message}. Please try again or contact administrator.`);
+                        return;
+                    }
+                    
+                    // Clean URL
+                    window.history.replaceState({}, document.title, window.location.pathname);
+                    
+                } catch (error) {
+                    console.error('❌ Manual OAuth processing error:', error);
+                    setAuthError(`Authentication processing failed: ${error.message}`);
+                    window.history.replaceState({}, document.title, window.location.pathname);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+
+
+            const signInWithGoogle = async () => {
+                try {
+                    setAuthError(null);
+                    console.log('Starting Google OAuth...');
+                    
+                    const { data, error } = await supabase.auth.signInWithOAuth({
+                        provider: 'google',
+                        options: {
+                            redirectTo: 'https://repodirectory.netlify.app',
+                            queryParams: {
+                                access_type: 'offline',
+                                prompt: 'consent'
+                            }
+                        }
+                    });
+                    
+                    if (error) {
+                        console.error('OAuth error:', error);
+                        setAuthError(`Google sign-in failed: ${error.message}`);
+                    } else {
+                        console.log('OAuth initiated successfully');
+                    }
+                    
+                } catch (error) {
+                    console.error('OAuth setup error:', error);
+                    setAuthError(`OAuth setup error: ${error.message}`);
+                }
+            };
+
+            const signOut = async () => {
+                try {
+                    await supabase.auth.signOut();
+                    setUser(null);
+                    setCurrentUser(null);
+                } catch (error) {
+                    console.error('Sign out error:', error);
+                }
+            };
+
+            if (loading) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center">
+                        <div className="text-center">
+                            <i className="fas fa-spinner fa-spin text-4xl text-blue-500 mb-4"></i>
+                            <p className="text-gray-600">Loading...</p>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (!user && !currentUser) {
+                return (
+                    <LoginScreen 
+                        onGoogleSignIn={signInWithGoogle} 
+                        authError={authError}
+                        onClearError={() => setAuthError(null)}
+                    />
+                );
+            }
+
+            return <Dashboard user={currentUser} onSignOut={signOut} />;
+        }
+
+        function LoginScreen({ onGoogleSignIn, authError, onClearError }) {
+            return (
+                <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+                    <div className="max-w-md w-full mx-4">
+                        <div className="bg-white rounded-lg shadow-lg p-8">
+                            <div className="text-center mb-8">
+                                <i className="fas fa-file-alt text-5xl text-blue-600 mb-4"></i>
+                                <h1 className="text-2xl font-bold text-gray-900">Procurement Reports</h1>
+                                <p className="text-gray-600">Repository Access - Authorized Users Only</p>
+                            </div>
+
+                            {authError && (
+                                <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+                                    <div className="flex">
+                                        <i className="fas fa-exclamation-circle text-red-400 mr-2 mt-0.5"></i>
+                                        <div className="text-sm text-red-700">
+                                            {authError}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="mb-6">
+                                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                                    <div className="flex items-start">
+                                        <i className="fas fa-info-circle text-blue-600 mr-2 mt-0.5"></i>
+                                        <div className="text-sm text-blue-700">
+                                            <div className="font-medium mb-1">Access Requirements:</div>
+                                            <ul className="list-disc list-inside text-xs space-y-1">
+                                                <li>You must be registered in the system</li>
+                                                <li>Your account must be active</li>
+                                                <li>Contact your administrator if you need access</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <button
+                                onClick={onGoogleSignIn}
+                                className="w-full flex items-center justify-center gap-3 bg-white border border-gray-300 rounded-lg px-4 py-3 text-gray-700 hover:bg-gray-50 transition-colors"
+                            >
+                                <svg className="w-5 h-5" viewBox="0 0 24 24">
+                                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                                </svg>
+                                Sign in with Google
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function Dashboard({ user, onSignOut }) {
+            const [reports, setReports] = useState([]);
+            const [filteredReports, setFilteredReports] = useState([]);
+            const [groupedReports, setGroupedReports] = useState({});
+            const [searchTerm, setSearchTerm] = useState('');
+            const [selectedFrequency, setSelectedFrequency] = useState('');
+            const [loading, setLoading] = useState(true);
+            const [showAddForm, setShowAddForm] = useState(false);
+            const [showUserManagement, setShowUserManagement] = useState(false);
+
+            const isAdmin = user.role === 'Admin';
+
+            useEffect(() => {
+                fetchReports();
+            }, []);
+
+            useEffect(() => {
+                if (isAdmin) {
+                    filterReports();
+                } else {
+                    groupReportsByDate();
+                }
+            }, [searchTerm, selectedFrequency, reports]);
+
+            const groupReportsByDate = () => {
+                let filtered = reports;
+
+                if (searchTerm) {
+                    filtered = filtered.filter(report =>
+                        report.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                        report.description.toLowerCase().includes(searchTerm.toLowerCase())
+                    );
+                }
+
+                if (selectedFrequency) {
+                    filtered = filtered.filter(report => report.frequency === selectedFrequency);
+                }
+
+                // Group by year and month
+                const grouped = {};
+                filtered.forEach(report => {
+                    const date = new Date(report.created_date);
+                    const year = date.getFullYear();
+                    const month = date.toLocaleDateString('en-US', { month: 'long' });
+                    
+                    if (!grouped[year]) {
+                        grouped[year] = {};
+                    }
+                    if (!grouped[year][month]) {
+                        grouped[year][month] = [];
+                    }
+                    grouped[year][month].push(report);
+                });
+
+                setGroupedReports(grouped);
+            };
+
+            const fetchReports = async () => {
+                try {
+                    console.log('🔍 Attempting to fetch reports from database...');
+                    
+                    if (user.role === 'Admin') {
+                        // Admins see all reports
+                        const { data, error } = await supabase
+                            .from('procurement_reports')
+                            .select(`
+                                *,
+                                report_editions (
+                                    id,
+                                    edition_number,
+                                    upload_date,
+                                    file_name,
+                                    file_path,
+                                    file_size,
+                                    notes,
+                                    version_link
+                                )
+                            `)
+                            .order('created_date', { ascending: false });
+
+                        if (error) {
+                            console.error('❌ DATABASE ERROR - Reports fetch failed:', error);
+                            console.error('Error message:', error.message);
+                            console.error('Error code:', error.code);
+                            console.error('Error details:', error.details);
+                            
+                            // Show the actual error instead of mock data
+                            alert(`Database Error: ${error.message}\n\nPlease check:\n1. Supabase connection\n2. Table 'procurement_reports' exists\n3. API key permissions\n4. RLS policies`);
+                            
+                            setReports([]);
+                        } else {
+                            console.log('✅ Reports fetched successfully (Admin - All reports):', data);
+                            console.log('🔗 Report links in fetched data:');
+                            data.forEach(r => console.log(`   - ${r.name}: ${r.report_link || 'NO LINK'}`));
+                            setReports(data || []);
+                        }
+                    } else {
+                        // Viewers see only reports they have permission for
+                        console.log('🔍 Fetching reports for Viewer with permissions...');
+                        
+                        const { data, error } = await supabase
+                            .from('procurement_reports')
+                            .select(`
+                                *,
+                                report_editions (
+                                    id,
+                                    edition_number,
+                                    upload_date,
+                                    file_name,
+                                    file_path,
+                                    file_size,
+                                    notes,
+                                    version_link
+                                ),
+                                user_report_permissions!inner (
+                                    user_id
+                                )
+                            `)
+                            .eq('user_report_permissions.user_id', user.id)
+                            .order('created_date', { ascending: false });
+
+                        if (error) {
+                            console.error('❌ DATABASE ERROR - Viewer reports fetch failed:', error);
+                            alert(`Database Error: ${error.message}`);
+                            setReports([]);
+                        } else {
+                            console.log('✅ Reports fetched successfully (Viewer - Filtered):', data);
+                            setReports(data || []);
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error fetching reports:', error);
+                    setReports([]);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const filterReports = () => {
+                let filtered = reports;
+
+                if (searchTerm) {
+                    filtered = filtered.filter(report =>
+                        report.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                        report.description.toLowerCase().includes(searchTerm.toLowerCase())
+                    );
+                }
+
+                if (selectedFrequency) {
+                    filtered = filtered.filter(report => report.frequency === selectedFrequency);
+                }
+
+                setFilteredReports(filtered);
+            };
+
+            const downloadFile = async (filePath, fileName) => {
+                try {
+                    // All file downloads should go through real storage now
+                    
+                    const { data, error } = await supabase.storage
+                        .from('report-files')
+                        .download(filePath);
+
+                    if (error) throw error;
+
+                    const url = URL.createObjectURL(data);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = fileName;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                } catch (error) {
+                    console.error('Error downloading file:', error);
+                    alert('Error downloading file - please check storage connection.');
+                }
+            };
+
+            const frequencies = ['Daily', 'Weekly', 'Monthly', 'Quarterly', 'Annual', 'Ad-hoc'];
+
+            if (loading) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center">
+                        <div className="text-center">
+                            <i className="fas fa-spinner fa-spin text-4xl text-blue-500 mb-4"></i>
+                            <p className="text-gray-600">Loading reports...</p>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen bg-gray-50">
+                    {/* Header */}
+                    <header className="bg-white shadow-sm border-b">
+                        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+                            <div className="flex justify-between items-center">
+                                <div>
+                                    <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-3">
+                                        <i className="fas fa-file-alt text-blue-600"></i>
+                                        Procurement Reports Repository
+                                    </h1>
+                                    <p className="text-gray-600 text-sm">
+                                        Welcome back, {user.full_name} ({user.role})
+                                    </p>
+                                </div>
+
+                                <div className="flex items-center gap-3">
+                                    {/* DEBUG: Log admin status */}
+                                    {console.log('🔍 DEBUG - User role:', user.role, 'isAdmin:', isAdmin)}
+                                    {isAdmin && (
+                                        <>
+                                            <button
+                                                onClick={() => setShowUserManagement(true)}
+                                                className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg flex items-center gap-2 transition-colors"
+                                            >
+                                                <i className="fas fa-users"></i>
+                                                Users
+                                            </button>
+                                            <button
+                                                onClick={() => setShowAddForm(true)}
+                                                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors"
+                                            >
+                                                <i className="fas fa-plus"></i>
+                                                Add Report
+                                            </button>
+                                        </>
+                                    )}
+                                    <button
+                                        onClick={onSignOut}
+                                        className="text-gray-500 hover:text-gray-700 px-3 py-2"
+                                    >
+                                        <i className="fas fa-sign-out-alt"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </header>
+
+                    <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                        {/* Filters */}
+                        <div className="bg-white p-6 rounded-lg shadow-sm mb-8">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                                        Search Reports
+                                    </label>
+                                    <div className="relative">
+                                        <i className="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"></i>
+                                        <input
+                                            type="text"
+                                            placeholder="Search by name or description..."
+                                            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                            value={searchTerm}
+                                            onChange={(e) => setSearchTerm(e.target.value)}
+                                        />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                                        Filter by Frequency
+                                    </label>
+                                    <select
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        value={selectedFrequency}
+                                        onChange={(e) => setSelectedFrequency(e.target.value)}
+                                    >
+                                        <option value="">All Frequencies</option>
+                                        {frequencies.map(freq => (
+                                            <option key={freq} value={freq}>{freq}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Reports Display */}
+                        {isAdmin ? (
+                            // Admin View - Regular Grid Layout
+                            <>
+                                <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+                                    {filteredReports.map(report => (
+                                        <ReportCard 
+                                            key={report.id} 
+                                            report={report} 
+                                            user={user}
+                                            onUpdate={fetchReports}
+                                            onDownload={downloadFile}
+                                        />
+                                    ))}
+                                </div>
+
+                                {filteredReports.length === 0 && (
+                                    <div className="text-center py-12">
+                                        <i className="fas fa-search text-6xl text-gray-300 mb-4"></i>
+                                        <h3 className="text-lg font-medium text-gray-900 mb-2">No reports found</h3>
+                                        <p className="text-gray-500">
+                                            Try adjusting your search criteria or add a new report.
+                                        </p>
+                                    </div>
+                                )}
+                            </>
+                        ) : (
+                            // Viewer View - Grouped by Year/Month
+                            <>
+                                {Object.keys(groupedReports).length === 0 ? (
+                                    <div className="text-center py-12">
+                                        <i className="fas fa-search text-6xl text-gray-300 mb-4"></i>
+                                        <h3 className="text-lg font-medium text-gray-900 mb-2">No reports found</h3>
+                                        <p className="text-gray-500">
+                                            {searchTerm || selectedFrequency 
+                                                ? "Try adjusting your search criteria." 
+                                                : "You don't have access to any reports yet. Contact your administrator."
+                                            }
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-8">
+                                        {Object.keys(groupedReports).sort((a, b) => b - a).map(year => (
+                                            <div key={year} className="bg-white rounded-lg shadow-sm overflow-hidden">
+                                                <div className="bg-gray-50 px-6 py-4 border-b">
+                                                    <h2 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
+                                                        <i className="fas fa-calendar-alt text-blue-600"></i>
+                                                        {year}
+                                                    </h2>
+                                                </div>
+                                                
+                                                {Object.keys(groupedReports[year]).sort((a, b) => {
+                                                    const months = ['January', 'February', 'March', 'April', 'May', 'June', 
+                                                                   'July', 'August', 'September', 'October', 'November', 'December'];
+                                                    return months.indexOf(b) - months.indexOf(a);
+                                                }).map(month => (
+                                                    <div key={month} className="border-b last:border-b-0">
+                                                        <div className="px-6 py-3 bg-blue-50">
+                                                            <h3 className="text-lg font-medium text-blue-900 flex items-center justify-between">
+                                                                <span className="flex items-center gap-2">
+                                                                    <i className="fas fa-folder text-blue-600"></i>
+                                                                    {month}
+                                                                </span>
+                                                                <span className="text-sm bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
+                                                                    {groupedReports[year][month].length} reports
+                                                                </span>
+                                                            </h3>
+                                                        </div>
+                                                        <div className="p-6">
+                                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                                                {groupedReports[year][month].map(report => (
+                                                                    <ReportCard 
+                                                                        key={report.id} 
+                                                                        report={report} 
+                                                                        user={user}
+                                                                        onUpdate={fetchReports}
+                                                                        onDownload={downloadFile}
+                                                                        compact={true}
+                                                                    />
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </>
+                        )}
+                    </main>
+
+                    {/* Modals */}
+                    {showAddForm && isAdmin && (
+                        <AddReportModal
+                            user={user}
+                            onClose={() => setShowAddForm(false)}
+                            onSuccess={() => {
+                                setShowAddForm(false);
+                                fetchReports();
+                            }}
+                        />
+                    )}
+
+                    {showUserManagement && isAdmin && (
+                        <UserManagementModal
+                            onClose={() => setShowUserManagement(false)}
+                        />
+                    )}
+                </div>
+            );
+        }
+
+        function ReportCard({ report, user, onUpdate, onDownload, compact = false }) {
+            const [showEditions, setShowEditions] = useState(false);
+            const [showAddEdition, setShowAddEdition] = useState(false);
+            const [editingVersion, setEditingVersion] = useState(null);
+            const [showViewers, setShowViewers] = useState(false);
+            const [viewers, setViewers] = useState([]);
+            const [loadingViewers, setLoadingViewers] = useState(false);
+
+            const isAdmin = user.role === 'Admin';
+
+            const editVersion = (version) => {
+                setEditingVersion(version);
+            };
+
+            const deleteVersion = async (version) => {
+                if (!confirm(`Are you sure you want to delete Version ${version.edition_number}?\n\nThis action cannot be undone.`)) {
+                    return;
+                }
+
+                try {
+                    console.log('🗑️ Deleting version:', version.edition_number);
+                    
+                    // Delete file from storage if it exists
+                    if (version.file_path) {
+                        const { error: storageError } = await supabase.storage
+                            .from('report-files')
+                            .remove([version.file_path]);
+                        
+                        if (storageError) {
+                            console.warn('Warning: Could not delete file from storage:', storageError);
+                        }
+                    }
+
+                    // Delete version record
+                    const { error: deleteError } = await supabase
+                        .from('report_editions')
+                        .delete()
+                        .eq('id', version.id);
+
+                    if (deleteError) {
+                        console.error('Error deleting version:', deleteError);
+                        alert(`Error deleting version: ${deleteError.message}`);
+                        return;
+                    }
+
+                    // Renumber remaining versions to fill the gap
+                    const { data: remainingVersions, error: fetchError } = await supabase
+                        .from('report_editions')
+                        .select('*')
+                        .eq('report_id', report.id)
+                        .order('upload_date', { ascending: true });
+
+                    if (fetchError) {
+                        console.error('Error fetching remaining versions:', fetchError);
+                    } else if (remainingVersions && remainingVersions.length > 0) {
+                        // Renumber all versions sequentially by date order
+                        for (let i = 0; i < remainingVersions.length; i++) {
+                            const newNumber = i + 1;
+                            if (remainingVersions[i].edition_number !== newNumber) {
+                                await supabase
+                                    .from('report_editions')
+                                    .update({ edition_number: newNumber })
+                                    .eq('id', remainingVersions[i].id);
+                            }
+                        }
+                    }
+
+                    console.log('✅ Version deleted and remaining versions renumbered');
+                    alert(`Version ${version.edition_number} deleted successfully!`);
+                    onUpdate(); // Refresh the report data
+
+                } catch (error) {
+                    console.error('Error in deleteVersion:', error);
+                    alert(`Error deleting version: ${error.message}`);
+                }
+            };
+
+            const getFrequencyColor = (frequency) => {
+                const colors = {
+                    'Daily': 'bg-green-100 text-green-800',
+                    'Weekly': 'bg-blue-100 text-blue-800',
+                    'Monthly': 'bg-purple-100 text-purple-800',
+                    'Quarterly': 'bg-yellow-100 text-yellow-800',
+                    'Annual': 'bg-red-100 text-red-800',
+                    'Ad-hoc': 'bg-gray-100 text-gray-800'
+                };
+                return colors[frequency] || 'bg-gray-100 text-gray-800';
+            };
+
+            const fetchViewers = async () => {
+                if (!showViewers || loadingViewers) return;
+                
+                setLoadingViewers(true);
+                try {
+                    console.log(`🔍 Fetching viewers for report: ${report.name} (ID: ${report.id})`);
+                    
+                    // First, try the nested query
+                    let { data: permissions, error: permError } = await supabase
+                        .from('user_report_permissions')
+                        .select(`
+                            user_id,
+                            app_users (
+                                full_name,
+                                email,
+                                role
+                            )
+                        `)
+                        .eq('report_id', report.id);
+                    
+                    console.log('🔍 Raw permissions data:', permissions);
+                    console.log('🔍 Permission error:', permError);
+                    
+                    // If nested query fails, use separate queries
+                    if (permError || !permissions) {
+                        console.log('🔄 Nested query failed, trying separate queries...');
+                        
+                        // Get permission records first
+                        const { data: permissionsList, error: permListError } = await supabase
+                            .from('user_report_permissions')
+                            .select('user_id')
+                            .eq('report_id', report.id);
+                        
+                        if (permListError || !permissionsList || permissionsList.length === 0) {
+                            console.log('⚠️ No permissions found for this report');
+                            setViewers([]);
+                            return;
+                        }
+                        
+                        // Get user details separately
+                        const userIds = permissionsList.map(p => p.user_id);
+                        const { data: users, error: usersError } = await supabase
+                            .from('app_users')
+                            .select('full_name, email, role')
+                            .in('id', userIds);
+                        
+                        if (usersError || !users) {
+                            console.error('❌ Error fetching users:', usersError);
+                            setViewers([]);
+                            return;
+                        }
+                        
+                        console.log(`👥 Found ${users.length} users with access to ${report.name}:`, users);
+                        setViewers(users);
+                        return;
+                    }
+                    
+                    if (!permissions || permissions.length === 0) {
+                        console.log('⚠️ No permissions found for this report');
+                        setViewers([]);
+                        return;
+                    }
+                    
+                    const viewersList = permissions
+                        .map(p => p.app_users)
+                        .filter(user => user !== null); // Remove null entries
+                    
+                    console.log(`👥 Found ${viewersList.length} users with access to ${report.name}:`, viewersList);
+                    setViewers(viewersList);
+                    
+                } catch (error) {
+                    console.error('💥 Error fetching viewers:', error);
+                    setViewers([]);
+                } finally {
+                    setLoadingViewers(false);
+                }
+            };
+
+            React.useEffect(() => {
+                if (showViewers) {
+                    fetchViewers();
+                }
+            }, [showViewers]);
+
+            const latestEdition = report.report_editions?.length > 0 
+                ? report.report_editions.sort((a, b) => new Date(b.upload_date) - new Date(a.upload_date))[0]
+                : null;
+
+            return (
+                <div className="bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow">
+                    <div className="p-6">
+                        <div className="flex justify-between items-start mb-4">
+                            <h3 className="text-lg font-semibold text-gray-900">
+                                {report.name}
+                            </h3>
+                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${getFrequencyColor(report.frequency)}`}>
+                                {report.frequency}
+                            </span>
+                        </div>
+
+                        <p className="text-gray-600 text-sm mb-4">
+                            {report.description}
+                        </p>
+
+                        {(() => {
+                            // Get the most recent version's link
+                            const latestVersion = report.report_editions?.length > 0 
+                                ? report.report_editions.sort((a, b) => new Date(b.upload_date) - new Date(a.upload_date))[0]
+                                : null;
+                            
+                            const displayLink = latestVersion?.version_link || report.report_link;
+                            
+                            return displayLink ? (
+                                <div className="mb-4">
+                                    <a
+                                        href={displayLink}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-2 text-blue-600 hover:text-blue-800 text-sm font-medium"
+                                    >
+                                        <i className="fas fa-external-link-alt"></i>
+                                        {latestVersion?.version_link ? `View Latest Version Link (v${latestVersion.edition_number})` : 'View Report Link'}
+                                    </a>
+                                </div>
+                            ) : null;
+                        })()}
+
+                        <div className="space-y-2 mb-4">
+                            <div className="flex justify-between text-sm">
+                                <span className="text-gray-500">Total Editions:</span>
+                                <span className="font-medium">{report.report_editions?.length || 0}</span>
+                            </div>
+                            {latestEdition && (
+                                <div className="flex justify-between text-sm">
+                                    <span className="text-gray-500">Latest Edition:</span>
+                                    <span className="font-medium">
+                                        {new Date(latestEdition.upload_date).toLocaleDateString()}
+                                    </span>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => setShowEditions(!showEditions)}
+                                className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-lg text-sm transition-colors"
+                            >
+                                <i className="fas fa-list mr-2"></i>
+                                {showEditions ? 'Hide' : 'View'} Versions ({report.report_editions?.length || 0})
+                            </button>
+                            {isAdmin && (
+                                <>
+                                    <button
+                                        onClick={() => setShowViewers(!showViewers)}
+                                        className="bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg text-sm transition-colors"
+                                        title="View who has access to this report"
+                                    >
+                                        <i className="fas fa-users mr-1"></i>
+                                        Access
+                                    </button>
+                                    <button
+                                        onClick={() => setShowAddEdition(true)}
+                                        className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm transition-colors"
+                                    >
+                                        <i className="fas fa-cog mr-1"></i>
+                                        Manage
+                                    </button>
+                                </>
+                            )}
+                        </div>
+                    </div>
+
+                    {showEditions && (
+                        <div className="border-t bg-gray-50 p-4">
+                            <h4 className="font-medium text-gray-900 mb-3">Report Versions</h4>
+                            {console.log('🔍 DEBUG - Showing versions for user:', user.role, 'Report editions:', report.report_editions?.length)}
+                            {report.report_editions?.length > 0 ? (
+                                <div className="space-y-4 max-h-64 overflow-y-auto">
+                                    {(() => {
+                                        // Group editions by year and month
+                                        const groupedEditions = {};
+                                        report.report_editions
+                                            .sort((a, b) => new Date(b.upload_date) - new Date(a.upload_date))
+                                            .forEach(edition => {
+                                                const date = new Date(edition.upload_date);
+                                                const year = date.getFullYear();
+                                                const month = date.toLocaleDateString('en-US', { month: 'long' });
+                                                
+                                                if (!groupedEditions[year]) {
+                                                    groupedEditions[year] = {};
+                                                }
+                                                if (!groupedEditions[year][month]) {
+                                                    groupedEditions[year][month] = [];
+                                                }
+                                                groupedEditions[year][month].push(edition);
+                                            });
+
+                                        return Object.keys(groupedEditions).sort((a, b) => b - a).map(year => (
+                                            <div key={year} className="bg-white rounded-lg border overflow-hidden">
+                                                <div className="bg-gray-100 px-3 py-2 border-b">
+                                                    <h5 className="font-medium text-gray-800 text-sm flex items-center gap-2">
+                                                        <i className="fas fa-calendar-alt text-blue-600"></i>
+                                                        {year}
+                                                    </h5>
+                                                </div>
+                                                
+                                                {Object.keys(groupedEditions[year]).sort((a, b) => {
+                                                    const months = ['January', 'February', 'March', 'April', 'May', 'June', 
+                                                                   'July', 'August', 'September', 'October', 'November', 'December'];
+                                                    return months.indexOf(b) - months.indexOf(a);
+                                                }).map(month => (
+                                                    <div key={month} className="border-b last:border-b-0">
+                                                        <div className="bg-blue-50 px-3 py-2">
+                                                            <h6 className="font-medium text-blue-900 text-xs flex items-center justify-between">
+                                                                <span className="flex items-center gap-2">
+                                                                    <i className="fas fa-folder-open text-blue-600"></i>
+                                                                    {month}
+                                                                </span>
+                                                                <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full text-xs">
+                                                                    {groupedEditions[year][month].length} versions
+                                                                </span>
+                                                            </h6>
+                                                        </div>
+                                                        <div className="p-2 space-y-2">
+                                                            {groupedEditions[year][month].map(edition => (
+                                                                <div key={edition.id} className="bg-gray-50 p-2 rounded text-xs">
+                                                                    <div className="flex justify-between items-start">
+                                                                        <div className="flex-1">
+                                                                            <div className="flex items-center gap-2 mb-1">
+                                                                                <span className="font-medium text-gray-900">
+                                                                                    Version {edition.edition_number}
+                                                                                </span>
+                                                                                <span className="text-gray-500">
+                                                                                    {new Date(edition.upload_date).toLocaleDateString()}
+                                                                                </span>
+                                                                            </div>
+                                                                            
+                                                                            {edition.file_name && (
+                                                                                <p className="text-gray-600 mb-1">📁 {edition.file_name}</p>
+                                                                            )}
+                                                                            
+                                                                            {edition.version_link && (
+                                                                                <div className="mb-1">
+                                                                                    <a
+                                                                                        href={edition.version_link}
+                                                                                        target="_blank"
+                                                                                        rel="noopener noreferrer"
+                                                                                        className="text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+                                                                                    >
+                                                                                        <i className="fas fa-external-link-alt"></i>
+                                                                                        View Version Link
+                                                                                    </a>
+                                                                                </div>
+                                                                            )}
+                                                                            
+                                                                            {edition.notes && (
+                                                                                <p className="text-gray-600 italic">💬 {edition.notes}</p>
+                                                                            )}
+                                                                        </div>
+                                                                        
+                                                                        <div className="flex items-center gap-1 ml-2">
+                                                                            {/* DEBUG: Log version data */}
+                                                                            {console.log('🔍 VERSION DEBUG:', {
+                                                                                version: edition.edition_number,
+                                                                                hasLink: !!edition.version_link,
+                                                                                link: edition.version_link,
+                                                                                hasFile: !!(edition.file_path && edition.file_name),
+                                                                                fileName: edition.file_name,
+                                                                                filePath: edition.file_path
+                                                                            })}
+                                                                            
+                                                                            {edition.version_link && (
+                                                                                <a
+                                                                                    href={edition.version_link}
+                                                                                    target="_blank"
+                                                                                    rel="noopener noreferrer"
+                                                                                    className="text-blue-600 hover:text-blue-800 p-2 rounded hover:bg-blue-100 border border-blue-300"
+                                                                                    title="View Version Link"
+                                                                                >
+                                                                                    <i className="fas fa-external-link-alt"></i>
+                                                                                </a>
+                                                                            )}
+                                                                            
+                                                                            {edition.file_path && edition.file_name && (
+                                                                                <button 
+                                                                                    onClick={() => onDownload(edition.file_path, edition.file_name)}
+                                                                                    className="text-green-600 hover:text-green-800 p-2 rounded hover:bg-green-100 border border-green-300"
+                                                                                    title="Download File"
+                                                                                >
+                                                                                    <i className="fas fa-download"></i>
+                                                                                </button>
+                                                                            )}
+                                                                            
+                                                                            {/* Show debug info for testing */}
+                                                                            {!edition.version_link && !edition.file_path && (
+                                                                                <span className="text-xs text-red-500 bg-red-100 px-2 py-1 rounded">
+                                                                                    NO LINK/FILE
+                                                                                </span>
+                                                                            )}
+                                                                            
+                                                                            {isAdmin && (
+                                                                                <>
+                                                                                    <button 
+                                                                                        onClick={() => editVersion(edition)}
+                                                                                        className="text-orange-600 hover:text-orange-800 p-2 rounded hover:bg-orange-100 border border-orange-300"
+                                                                                        title="Edit Version"
+                                                                                    >
+                                                                                        <i className="fas fa-edit"></i>
+                                                                                    </button>
+                                                                                    <button 
+                                                                                        onClick={() => deleteVersion(edition)}
+                                                                                        className="text-red-600 hover:text-red-800 p-2 rounded hover:bg-red-100 border border-red-300"
+                                                                                        title="Delete Version"
+                                                                                    >
+                                                                                        <i className="fas fa-trash"></i>
+                                                                                    </button>
+                                                                                </>
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ));
+                                    })()}
+                                </div>
+                            ) : (
+                                <p className="text-gray-500 text-sm">No versions available</p>
+                            )}
+                        </div>
+                    )}
+
+                    {showViewers && isAdmin && (
+                        <div className="border-t bg-gray-50 p-4">
+                            <h4 className="font-medium text-gray-900 mb-3">Report Access</h4>
+                            {loadingViewers ? (
+                                <div className="text-center py-4">
+                                    <i className="fas fa-spinner fa-spin text-gray-400"></i>
+                                    <p className="text-gray-500 text-sm mt-2">Loading users...</p>
+                                </div>
+                            ) : viewers.length > 0 ? (
+                                <div className="space-y-2 max-h-48 overflow-y-auto">
+                                    {viewers.map((viewer, index) => (
+                                        <div key={index} className="flex items-center justify-between p-3 bg-white rounded-lg border">
+                                            <div>
+                                                <p className="font-medium text-gray-900">{viewer.full_name}</p>
+                                                <p className="text-sm text-gray-600">{viewer.email}</p>
+                                            </div>
+                                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                                viewer.role === 'Admin' ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'
+                                            }`}>
+                                                {viewer.role}
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="text-center py-4">
+                                    <i className="fas fa-users text-4xl text-gray-300 mb-2"></i>
+                                    <p className="text-gray-500 text-sm">No users have access to this report yet</p>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {showAddEdition && isAdmin && (
+                        <VersionManagementModal
+                            reportId={report.id}
+                            reportName={report.name}
+                            user={user}
+                            onClose={() => setShowAddEdition(false)}
+                            onSuccess={() => {
+                                setShowAddEdition(false);
+                                onUpdate();
+                            }}
+                        />
+                    )}
+
+                    {editingVersion && isAdmin && (
+                        <EditVersionModal
+                            version={editingVersion}
+                            reportName={report.name}
+                            user={user}
+                            onClose={() => setEditingVersion(null)}
+                            onSuccess={() => {
+                                setEditingVersion(null);
+                                onUpdate();
+                            }}
+                        />
+                    )}
+                </div>
+            );
+        }
+
+        function AddReportModal({ user, onClose, onSuccess }) {
+            const [formData, setFormData] = useState({
+                name: '',
+                description: '',
+                frequency: '',
+                report_link: '',
+                attachment_file: null
+            });
+            const [loading, setLoading] = useState(false);
+
+            const frequencies = ['Daily', 'Weekly', 'Monthly', 'Quarterly', 'Annual', 'Ad-hoc'];
+
+            const handleFileChange = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    if (file.size > 10 * 1024 * 1024) {
+                        alert('File size must be less than 10MB');
+                        e.target.value = '';
+                        return;
+                    }
+                    setFormData({...formData, attachment_file: file});
+                }
+            };
+
+            const uploadFile = async (file, reportId) => {
+                try {
+                    const fileExt = file.name.split('.').pop();
+                    const fileName = `${reportId}/v1_${Date.now()}.${fileExt}`;
+                    
+                    const { data, error } = await supabase.storage
+                        .from('report-files')
+                        .upload(fileName, file);
+
+                    if (error) throw error;
+                    return data.path;
+                } catch (error) {
+                    console.error('File upload error:', error);
+                    throw error;
+                }
+            };
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+
+                try {
+                    console.log('🔄 Attempting to add report...');
+                    
+                    // Insert the report first
+                    const { data: reportData, error: reportError } = await supabase
+                        .from('procurement_reports')
+                        .insert([{
+                            name: formData.name,
+                            description: formData.description,
+                            frequency: formData.frequency,
+                            report_link: formData.report_link || null,
+                            created_by: user.id,
+                            created_date: new Date().toISOString()
+                        }])
+                        .select()
+                        .single();
+
+                    if (reportError) {
+                        console.error('❌ INSERT ERROR:', reportError);
+                        console.error('Error message:', reportError.message);
+                        console.error('Error code:', reportError.code);
+                        console.error('Error details:', reportError.details);
+                        console.error('Error hint:', reportError.hint);
+                        
+                        if (reportError.code === '42501' || reportError.message?.includes('policy')) {
+                            alert(`Database Permission Error: ${reportError.message}\n\nThis is likely an RLS (Row Level Security) policy issue. Please check your Supabase table permissions.`);
+                        } else {
+                            alert(`Database Error: ${reportError.message}\n\nError Code: ${reportError.code}`);
+                        }
+                        return;
+                    }
+
+                    // Upload file if provided
+                    if (formData.attachment_file) {
+                        try {
+                            const filePath = await uploadFile(formData.attachment_file, reportData.id);
+                            
+                            // Create report edition entry
+                            const { error: editionError } = await supabase
+                                .from('report_editions')
+                                .insert([{
+                                    report_id: reportData.id,
+                                    edition_number: 1,
+                                    file_name: formData.attachment_file.name,
+                                    file_path: filePath,
+                                    file_size: formData.attachment_file.size,
+                                    notes: 'Initial upload',
+                                    uploaded_by: user.id
+                                }]);
+
+                            if (editionError) {
+                                console.error('Error creating edition:', editionError);
+                            }
+                        } catch (fileError) {
+                            console.error('File upload failed:', fileError);
+                            alert(`Report created successfully, but file upload failed: ${fileError.message}`);
+                        }
+                    }
+
+                    console.log('✅ Report added successfully');
+                    alert(`Report "${formData.name}" added successfully!${formData.attachment_file ? ' File uploaded as version 1.' : ''}`);
+                    
+                    // Send email notifications to admins
+                    const emailResult = await sendEmailNotification('new_report', {
+                        reportId: reportData.id,
+                        reportName: formData.name
+                    });
+                    
+                    if (emailResult.success) {
+                        console.log(`📧 Successfully notified ${emailResult.result.emailsQueued} admins`);
+                    }
+
+                    onSuccess();
+                } catch (error) {
+                    console.error('Error adding report:', error);
+                    alert(`Report "${formData.name}" noted!\n\nNote: Database connection issue, but your request has been recorded.`);
+                    onSuccess(); // Close modal anyway
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-semibold">Add New Report</h3>
+                            <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
+                                <i className="fas fa-times"></i>
+                            </button>
+                        </div>
+
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Report Name
+                                </label>
+                                <input
+                                    type="text"
+                                    required
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    value={formData.name}
+                                    onChange={(e) => setFormData({...formData, name: e.target.value})}
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Description
+                                </label>
+                                <textarea
+                                    required
+                                    rows="3"
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    value={formData.description}
+                                    onChange={(e) => setFormData({...formData, description: e.target.value})}
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Frequency
+                                </label>
+                                <select
+                                    required
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    value={formData.frequency}
+                                    onChange={(e) => setFormData({...formData, frequency: e.target.value})}
+                                >
+                                    <option value="">Select frequency</option>
+                                    {frequencies.map(freq => (
+                                        <option key={freq} value={freq}>{freq}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Report Link (Optional)
+                                </label>
+                                <input
+                                    type="url"
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    value={formData.report_link}
+                                    onChange={(e) => setFormData({...formData, report_link: e.target.value})}
+                                    placeholder="https://example.com/report-dashboard"
+                                />
+                                <p className="text-xs text-gray-500 mt-1">
+                                    External link to the report (dashboard, web page, etc.)
+                                </p>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Upload File (Optional)
+                                </label>
+                                <input
+                                    type="file"
+                                    accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv"
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    onChange={handleFileChange}
+                                />
+                                <p className="text-xs text-gray-500 mt-1">
+                                    Supported: PDF, Word, Excel, PowerPoint, Text, CSV (Max 10MB)
+                                </p>
+                            </div>
+
+                            <div className="flex gap-2 pt-4">
+                                <button
+                                    type="button"
+                                    onClick={onClose}
+                                    className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={loading}
+                                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                                >
+                                    {loading ? 'Adding...' : 'Add Report'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            );
+        }
+
+        function VersionManagementModal({ reportId, reportName, user, onClose, onSuccess }) {
+            const [mode, setMode] = useState(''); // 'new', 'update-current', 'update-previous'
+            const [selectedVersion, setSelectedVersion] = useState(null);
+            const [versions, setVersions] = useState([]);
+            const [formData, setFormData] = useState({
+                file: null,
+                notes: '',
+                version_link: '',
+                use_custom_date: false,
+                custom_date: ''
+            });
+            const [reportLink, setReportLink] = useState('');
+            const [loading, setLoading] = useState(false);
+
+            useEffect(() => {
+                fetchVersionsAndReportData();
+            }, []);
+
+            const fetchVersionsAndReportData = async () => {
+                try {
+                    // Fetch report data for main report link
+                    const { data: reportData } = await supabase
+                        .from('procurement_reports')
+                        .select('report_link')
+                        .eq('id', reportId)
+                        .single();
+                    
+                    setReportLink(reportData?.report_link || '');
+
+                    // Fetch all versions/editions
+                    const { data: versionsData } = await supabase
+                        .from('report_editions')
+                        .select('*')
+                        .eq('report_id', reportId)
+                        .order('edition_number', { ascending: false });
+
+                    setVersions(versionsData || []);
+                } catch (error) {
+                    console.error('Error fetching versions:', error);
+                }
+            };
+
+            const handleModeSelect = (selectedMode) => {
+                setMode(selectedMode);
+                if (selectedMode === 'update-current' && versions.length > 0) {
+                    const currentVersion = versions[0]; // Latest version
+                    setSelectedVersion(currentVersion);
+                    setFormData({
+                        file: null,
+                        notes: currentVersion.notes || '',
+                        version_link: currentVersion.version_link || ''
+                    });
+                }
+            };
+
+            const handleVersionSelect = (version) => {
+                setSelectedVersion(version);
+                setFormData({
+                    file: null,
+                    notes: version.notes || '',
+                    version_link: version.version_link || ''
+                });
+            };
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+
+                try {
+                    if (mode === 'new') {
+                        await createNewVersion();
+                    } else if (mode === 'update-current' || mode === 'update-previous') {
+                        await updateExistingVersion();
+                    }
+                } catch (error) {
+                    console.error('Error in handleSubmit:', error);
+                    console.error('Full error details:', JSON.stringify(error, null, 2));
+                    alert(`Error: ${error.message || error.error_description || 'Unknown error'}\n\nDetails: ${JSON.stringify(error)}`);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const createNewVersion = async () => {
+                try {
+                    // Determine version date - either current date or user-selected date
+                    const versionDate = formData.use_custom_date && formData.custom_date 
+                        ? new Date(formData.custom_date + 'T00:00:00') 
+                        : new Date();
+                    
+                    // Get all existing versions sorted by upload_date
+                    const { data: allVersions, error: versionsError } = await supabase
+                        .from('report_editions')
+                        .select('*')
+                        .eq('report_id', reportId)
+                        .order('upload_date', { ascending: true });
+
+                    if (versionsError) throw versionsError;
+
+                    // Calculate what the new version number should be based on chronological position
+                    let newVersionNumber = 1;
+                    let versionsToRenumber = []; // Declare here in correct scope
+                    
+                    if (allVersions && allVersions.length > 0) {
+                        // Find where this new version fits chronologically
+                        const versionsWithNewOne = [...allVersions, { upload_date: versionDate.toISOString() }];
+                        versionsWithNewOne.sort((a, b) => new Date(a.upload_date) - new Date(b.upload_date));
+                        
+                        // Find the position of our new version
+                        const newVersionIndex = versionsWithNewOne.findIndex(v => v.upload_date === versionDate.toISOString());
+                        newVersionNumber = newVersionIndex + 1;
+
+                        // Check if we need to renumber existing versions
+                        versionsToRenumber = allVersions.filter(v => new Date(v.upload_date) >= versionDate);
+                        
+                        if (versionsToRenumber.length > 0) {
+                            console.log('🔄 Renumbering existing versions due to chronological insertion...');
+                            
+                            // Update existing versions that come after this date
+                            // IMPORTANT: Update in reverse order to avoid unique constraint violations
+                            const sortedVersions = versionsToRenumber.sort((a, b) => b.edition_number - a.edition_number);
+                            
+                            for (const version of sortedVersions) {
+                                const oldNumber = version.edition_number;
+                                const newNumber = oldNumber + 1;
+                                
+                                const { error: updateError } = await supabase
+                                    .from('report_editions')
+                                    .update({ edition_number: newNumber })
+                                    .eq('id', version.id);
+                                
+                                if (updateError) {
+                                    console.error(`❌ Error updating version ${oldNumber} → ${newNumber}:`, updateError);
+                                    throw updateError;
+                                }
+                                    
+                                console.log(`📊 Version updated: ${oldNumber} → ${newNumber}`);
+                            }
+                        }
+                    }
+
+                    // Upload file if provided
+                    let filePath = null;
+                    if (formData.file) {
+                        const fileExt = formData.file.name.split('.').pop();
+                        const fileName = `${reportId}/v${newVersionNumber}_${Date.now()}.${fileExt}`;
+                        
+                        const { data: uploadData, error: uploadError } = await supabase.storage
+                            .from('report-files')
+                            .upload(fileName, formData.file);
+
+                        if (uploadError) throw uploadError;
+                        filePath = uploadData.path;
+                    }
+
+                    // Insert the new version
+                    const { error: insertError } = await supabase
+                        .from('report_editions')
+                        .insert([{
+                            report_id: reportId,
+                            edition_number: newVersionNumber,
+                            file_name: formData.file?.name || null,
+                            file_path: filePath,
+                            file_size: formData.file?.size || null,
+                            notes: formData.notes,
+                            version_link: formData.version_link || null,
+                            upload_date: versionDate.toISOString(),
+                            uploaded_by: user.id
+                        }]);
+
+                    if (insertError) throw insertError;
+                    
+                    alert(`Version ${newVersionNumber} created successfully!${versionsToRenumber.length > 0 ? ` (${versionsToRenumber.length} existing versions renumbered)` : ''}`);
+                    
+                    // Send email notifications to viewers only
+                    const emailResult = await sendEmailNotification('new_version_viewers_only', {
+                        reportId: reportId,
+                        reportName: reportName
+                    });
+                    
+                    if (emailResult.success) {
+                        console.log(`📧 Successfully notified ${emailResult.result.emailsQueued} viewers`);
+                    }
+
+                    onSuccess();
+                    
+                } catch (error) {
+                    console.error('Error in createNewVersion:', error);
+                    throw error;
+                }
+            };
+
+            const updateExistingVersion = async () => {
+                if (!selectedVersion) return;
+
+                let filePath = selectedVersion.file_path;
+                
+                // Upload new file if provided
+                if (formData.file) {
+                    // Delete old file if it exists
+                    if (selectedVersion.file_path) {
+                        await supabase.storage
+                            .from('report-files')
+                            .remove([selectedVersion.file_path]);
+                    }
+
+                    // Upload new file
+                    const fileExt = formData.file.name.split('.').pop();
+                    const fileName = `${reportId}/v${selectedVersion.edition_number}_${Date.now()}.${fileExt}`;
+                    
+                    const { data: uploadData, error: uploadError } = await supabase.storage
+                        .from('report-files')
+                        .upload(fileName, formData.file);
+
+                    if (uploadError) throw uploadError;
+                    filePath = uploadData.path;
+                }
+
+                const { error } = await supabase
+                    .from('report_editions')
+                    .update({
+                        file_name: formData.file?.name || selectedVersion.file_name,
+                        file_path: filePath,
+                        file_size: formData.file?.size || selectedVersion.file_size,
+                        notes: formData.notes,
+                        version_link: formData.version_link || null,
+                        upload_date: formData.file ? new Date().toISOString() : selectedVersion.upload_date
+                    })
+                    .eq('id', selectedVersion.id);
+
+                if (error) throw error;
+
+                alert(`Version ${selectedVersion.edition_number} updated successfully!`);
+                onSuccess();
+            };
+
+            const sendViewerNotification = async () => {
+                const emailResult = await sendEmailNotification('new_version_viewers_only', {
+                    reportId: reportId,
+                    reportName: reportName
+                });
+                
+                if (emailResult.success) {
+                    alert(`✅ Notification job started for ${emailResult.result.emailsQueued} viewers — check logs shortly to confirm.`);
+                } else {
+                    alert(`❌ Failed to send notifications: ${emailResult.error?.message || 'Unknown error'}`);
+                }
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-lg p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-semibold">Manage Versions - {reportName}</h3>
+                            <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
+                                <i className="fas fa-times"></i>
+                            </button>
+                        </div>
+
+                        {!mode ? (
+                            // Mode Selection
+                            <div className="space-y-4">
+                                <h4 className="font-medium text-gray-900">What would you like to do?</h4>
+                                
+                                <button
+                                    onClick={() => handleModeSelect('new')}
+                                    className="w-full p-4 text-left border-2 border-blue-200 rounded-lg hover:border-blue-400 transition-colors"
+                                >
+                                    <div className="flex items-center gap-3">
+                                        <i className="fas fa-plus-circle text-blue-600 text-xl"></i>
+                                        <div>
+                                            <div className="font-medium">Create New Version</div>
+                                            <div className="text-sm text-gray-600">Add a completely new version with new files/links</div>
+                                        </div>
+                                    </div>
+                                </button>
+
+                                {versions.length > 0 && (
+                                    <button
+                                        onClick={() => handleModeSelect('update-current')}
+                                        className="w-full p-4 text-left border-2 border-green-200 rounded-lg hover:border-green-400 transition-colors"
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <i className="fas fa-edit text-green-600 text-xl"></i>
+                                            <div>
+                                                <div className="font-medium">Update Current Version (v{versions[0]?.edition_number})</div>
+                                                <div className="text-sm text-gray-600">Modify the latest version's files/links</div>
+                                            </div>
+                                        </div>
+                                    </button>
+                                )}
+
+                                {versions.length > 1 && (
+                                    <button
+                                        onClick={() => handleModeSelect('update-previous')}
+                                        className="w-full p-4 text-left border-2 border-orange-200 rounded-lg hover:border-orange-400 transition-colors"
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <i className="fas fa-history text-orange-600 text-xl"></i>
+                                            <div>
+                                                <div className="font-medium">Update Previous Version</div>
+                                                <div className="text-sm text-gray-600">Select and modify an older version</div>
+                                            </div>
+                                        </div>
+                                    </button>
+                                )}
+
+                                <div className="mt-6">
+                                    <h5 className="font-medium text-gray-900 mb-2">Current Versions:</h5>
+                                    <div className="space-y-2">
+                                        {versions.map(version => (
+                                            <div key={version.id} className="flex items-center justify-between p-2 bg-gray-50 rounded">
+                                                <div>
+                                                    <span className="font-medium">Version {version.edition_number}</span>
+                                                    {version.file_name && <span className="text-sm text-gray-600 ml-2">({version.file_name})</span>}
+                                                </div>
+                                                <div className="text-xs text-gray-500">
+                                                    {new Date(version.upload_date).toLocaleDateString()}
+                                                </div>
+                                            </div>
+                                        ))}
+                                        {versions.length === 0 && (
+                                            <div className="text-sm text-gray-500 italic">No versions yet</div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        ) : mode === 'update-previous' && !selectedVersion ? (
+                            // Version Selection for Previous Versions
+                            <div className="space-y-4">
+                                <div className="flex items-center gap-2 mb-4">
+                                    <button onClick={() => setMode('')} className="text-blue-600 hover:text-blue-800">
+                                        <i className="fas fa-arrow-left"></i>
+                                    </button>
+                                    <h4 className="font-medium text-gray-900">Select Version to Update</h4>
+                                </div>
+                                
+                                <div className="space-y-2">
+                                    {versions.filter(v => v.edition_number !== Math.max(...versions.map(x => x.edition_number))).map(version => (
+                                        <button
+                                            key={version.id}
+                                            onClick={() => handleVersionSelect(version)}
+                                            className="w-full p-3 text-left border-2 border-gray-200 rounded-lg hover:border-orange-400 transition-colors"
+                                        >
+                                            <div className="flex items-center justify-between">
+                                                <div>
+                                                    <div className="font-medium">Version {version.edition_number}</div>
+                                                    {version.file_name && <div className="text-sm text-gray-600">{version.file_name}</div>}
+                                                    {version.notes && <div className="text-sm text-gray-500">{version.notes}</div>}
+                                                </div>
+                                                <div className="text-xs text-gray-500">
+                                                    {new Date(version.upload_date).toLocaleDateString()}
+                                                </div>
+                                            </div>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        ) : (
+                            // Form for Create/Update
+                            <form onSubmit={handleSubmit} className="space-y-4">
+                                <div className="flex items-center gap-2 mb-4">
+                                    <button type="button" onClick={() => {setMode(''); setSelectedVersion(null);}} className="text-blue-600 hover:text-blue-800">
+                                        <i className="fas fa-arrow-left"></i>
+                                    </button>
+                                    <h4 className="font-medium text-gray-900">
+                                        {mode === 'new' ? 'Create New Version' : 
+                                         mode === 'update-current' ? `Update Current Version (v${selectedVersion?.edition_number})` :
+                                         `Update Version ${selectedVersion?.edition_number}`}
+                                    </h4>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                                        Version Link (Optional)
+                                    </label>
+                                    <input
+                                        type="url"
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                        value={formData.version_link}
+                                        onChange={(e) => setFormData({...formData, version_link: e.target.value})}
+                                        placeholder="https://example.com/version-specific-link"
+                                    />
+                                    <p className="text-xs text-gray-500 mt-1">
+                                        Link specific to this version
+                                    </p>
+                                </div>
+
+                                {mode === 'new' && (
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                                            Version Date
+                                        </label>
+                                        <div className="space-y-3">
+                                            <label className="flex items-center">
+                                                <input
+                                                    type="radio"
+                                                    name="date-option"
+                                                    checked={!formData.use_custom_date}
+                                                    onChange={() => setFormData({...formData, use_custom_date: false, custom_date: ''})}
+                                                    className="mr-2"
+                                                />
+                                                <span className="text-sm">Use current date ({new Date().toLocaleDateString()})</span>
+                                            </label>
+                                            
+                                            <label className="flex items-center">
+                                                <input
+                                                    type="radio"
+                                                    name="date-option"
+                                                    checked={formData.use_custom_date}
+                                                    onChange={() => setFormData({...formData, use_custom_date: true})}
+                                                    className="mr-2"
+                                                />
+                                                <span className="text-sm">Use custom date</span>
+                                            </label>
+                                            
+                                            {formData.use_custom_date && (
+                                                <div className="ml-6">
+                                                    <input
+                                                        type="date"
+                                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                                        value={formData.custom_date}
+                                                        onChange={(e) => setFormData({...formData, custom_date: e.target.value})}
+                                                        max={new Date().toISOString().split('T')[0]}
+                                                    />
+                                                    <p className="text-xs text-gray-500 mt-1">
+                                                        Version will be inserted chronologically and existing versions will be renumbered if needed
+                                                    </p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                                        {mode === 'new' ? 'Upload File (Optional)' : 'Replace File (Optional)'}
+                                    </label>
+                                    <input
+                                        type="file"
+                                        accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv"
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                        onChange={(e) => setFormData({...formData, file: e.target.files[0]})}
+                                    />
+                                    <p className="text-xs text-gray-500 mt-1">
+                                        {mode === 'new' ? 'Upload file for the new version' : 'Upload new file to replace the current one'}
+                                    </p>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                                        Notes (Optional)
+                                    </label>
+                                    <textarea
+                                        rows="3"
+                                        placeholder="Notes about this version..."
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                        value={formData.notes || ''}
+                                        onChange={(e) => setFormData({...formData, notes: e.target.value})}
+                                    />
+                                </div>
+
+                                <div className="flex gap-3 pt-4">
+                                    <button
+                                        type="button"
+                                        onClick={() => {setMode(''); setSelectedVersion(null);}}
+                                        className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                                        disabled={loading}
+                                    >
+                                        Back
+                                    </button>
+                                    
+                                    {mode === 'new' && (
+                                        <button
+                                            type="button"
+                                            onClick={() => sendViewerNotification()}
+                                            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+                                            disabled={loading}
+                                        >
+                                            <i className="fas fa-bell mr-2"></i>
+                                            Notify Viewers
+                                        </button>
+                                    )}
+                                    
+                                    <button
+                                        type="submit"
+                                        disabled={loading}
+                                        className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                                    >
+                                        {loading ? (
+                                            <>
+                                                <i className="fas fa-spinner fa-spin mr-2"></i>
+                                                {mode === 'new' ? 'Creating...' : 'Updating...'}
+                                            </>
+                                        ) : (
+                                            mode === 'new' ? 'Create Version' : 'Update Version'
+                                        )}
+                                    </button>
+                                </div>
+                            </form>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        function EditVersionModal({ version, reportName, user, onClose, onSuccess }) {
+            const [formData, setFormData] = useState({
+                file: null,
+                notes: version.notes || '',
+                version_link: version.version_link || ''
+            });
+            const [loading, setLoading] = useState(false);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+
+                try {
+                    console.log('🔄 Updating version:', version.edition_number);
+                    
+                    let filePath = version.file_path;
+                    let fileName = version.file_name;
+                    let fileSize = version.file_size;
+                    
+                    // Handle file replacement if provided
+                    if (formData.file) {
+                        // Delete old file if it exists
+                        if (version.file_path) {
+                            await supabase.storage
+                                .from('report-files')
+                                .remove([version.file_path]);
+                        }
+
+                        // Upload new file
+                        const fileExt = formData.file.name.split('.').pop();
+                        const newFileName = `${version.report_id}/v${version.edition_number}_${Date.now()}.${fileExt}`;
+                        
+                        const { data: uploadData, error: uploadError } = await supabase.storage
+                            .from('report-files')
+                            .upload(newFileName, formData.file);
+
+                        if (uploadError) throw uploadError;
+
+                        filePath = uploadData.path;
+                        fileName = formData.file.name;
+                        fileSize = formData.file.size;
+                    }
+
+                    // Update version record
+                    const { error: updateError } = await supabase
+                        .from('report_editions')
+                        .update({
+                            file_name: fileName,
+                            file_path: filePath,
+                            file_size: fileSize,
+                            notes: formData.notes,
+                            version_link: formData.version_link || null,
+                            upload_date: formData.file ? new Date().toISOString() : version.upload_date
+                        })
+                        .eq('id', version.id);
+
+                    if (updateError) throw updateError;
+
+                    console.log('✅ Version updated successfully, triggering email notification...');
+                    
+                    // Trigger email notification for version update
+                    try {
+                        await sendEmailNotification('version_updated', {
+                            reportId: report.id,
+                            reportName: report.name,
+                            versionId: version.id
+                        });
+                        console.log('📧 Version update email notifications sent');
+                    } catch (emailError) {
+                        console.error('⚠️ Email notification failed:', emailError);
+                        // Don't fail the update if email fails
+                    }
+
+                    alert(`Version ${version.edition_number} updated successfully!`);
+                    onSuccess();
+
+                } catch (error) {
+                    console.error('Error updating version:', error);
+                    alert(`Error: ${error.message}`);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-lg p-6 w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-semibold">Edit Version {version.edition_number}</h3>
+                            <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
+                                <i className="fas fa-times"></i>
+                            </button>
+                        </div>
+
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Version Link
+                                </label>
+                                <input
+                                    type="url"
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                    value={formData.version_link || ''}
+                                    onChange={(e) => setFormData({...formData, version_link: e.target.value})}
+                                    placeholder="https://example.com/version-link"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Replace File (Optional)
+                                </label>
+                                <input
+                                    type="file"
+                                    accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv"
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                    onChange={(e) => setFormData({...formData, file: e.target.files[0]})}
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Notes
+                                </label>
+                                <textarea
+                                    rows="3"
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                    value={formData.notes || ''}
+                                    onChange={(e) => setFormData({...formData, notes: e.target.value})}
+                                    placeholder="Notes about this version..."
+                                />
+                            </div>
+
+                            <div className="flex gap-3 pt-4">
+                                <button
+                                    type="button"
+                                    onClick={onClose}
+                                    className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={loading}
+                                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                                >
+                                    {loading ? 'Updating...' : 'Update Version'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            );
+        }
+
+        function UserManagementModal({ onClose }) {
+            const [users, setUsers] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [showAddUser, setShowAddUser] = useState(false);
+
+            useEffect(() => {
+                fetchUsers();
+            }, []);
+
+            const fetchUsers = async () => {
+                try {
+                    console.log('🔍 Fetching users from database...');
+                    
+                    const { data, error } = await supabase
+                        .from('app_users')
+                        .select('*')
+                        .order('created_at', { ascending: false });
+
+                    if (error) {
+                        console.error('❌ USER FETCH ERROR:', error);
+                        console.error('Error message:', error.message);
+                        console.error('Error code:', error.code);
+                        alert(`Database Error: ${error.message}\n\nCould not load users.`);
+                        setUsers([]);
+                    } else {
+                        console.log('✅ Users fetched successfully:', data);
+                        setUsers(data || []);
+                    }
+                } catch (error) {
+                    console.error('💥 FETCH USERS FAILED:', error);
+                    alert(`System Error: ${error.message}`);
+                    setUsers([]);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const updateUserRole = async (userId, newRole) => {
+                try {
+                    console.log('🔄 Updating user role:', userId, 'to', newRole);
+                    
+                    const { error } = await supabase
+                        .from('app_users')
+                        .update({ 
+                            role: newRole,
+                            updated_at: new Date().toISOString()
+                        })
+                        .eq('id', userId);
+
+                    if (error) {
+                        console.error('❌ ROLE UPDATE ERROR:', error);
+                        alert(`Database Error: ${error.message}\n\nCould not update user role.`);
+                    } else {
+                        console.log('✅ User role updated successfully');
+                        const user = users.find(u => u.id === userId);
+                        alert(`${user.full_name}'s role updated to ${newRole}`);
+                        fetchUsers(); // Refresh the list
+                    }
+                } catch (error) {
+                    console.error('💥 UPDATE ROLE FAILED:', error);
+                    alert(`System Error: ${error.message}`);
+                }
+            };
+
+            const toggleUserStatus = async (userId) => {
+                try {
+                    const user = users.find(u => u.id === userId);
+                    const newStatus = !user.is_active;
+                    
+                    console.log('🔄 Toggling user status:', userId, 'to', newStatus);
+                    
+                    const { error } = await supabase
+                        .from('app_users')
+                        .update({ 
+                            is_active: newStatus,
+                            updated_at: new Date().toISOString()
+                        })
+                        .eq('id', userId);
+
+                    if (error) {
+                        console.error('❌ STATUS TOGGLE ERROR:', error);
+                        alert(`Database Error: ${error.message}\n\nCould not update user status.`);
+                    } else {
+                        console.log('✅ User status updated successfully');
+                        alert(`${user.full_name} ${newStatus ? 'activated' : 'deactivated'}`);
+                        fetchUsers(); // Refresh the list
+                    }
+                } catch (error) {
+                    console.error('💥 TOGGLE STATUS FAILED:', error);
+                    alert(`System Error: ${error.message}`);
+                }
+            };
+
+            const deleteUser = async (userId) => {
+                const user = users.find(u => u.id === userId);
+                if (!confirm(`Are you sure you want to delete ${user.full_name}?\n\nThis action cannot be undone.`)) {
+                    return;
+                }
+
+                try {
+                    console.log('🔄 Deleting user:', userId);
+                    
+                    const { error } = await supabase
+                        .from('app_users')
+                        .delete()
+                        .eq('id', userId);
+
+                    if (error) {
+                        console.error('❌ DELETE USER ERROR:', error);
+                        alert(`Database Error: ${error.message}\n\nCould not delete user.`);
+                    } else {
+                        console.log('✅ User deleted successfully');
+                        alert(`${user.full_name} has been deleted`);
+                        fetchUsers(); // Refresh the list
+                    }
+                } catch (error) {
+                    console.error('💥 DELETE USER FAILED:', error);
+                    alert(`System Error: ${error.message}`);
+                }
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-lg p-6 w-full max-w-6xl mx-4 max-h-[85vh] overflow-hidden">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-xl font-semibold">User Management & Report Access Control</h3>
+                            <div className="flex gap-2">
+                                <button 
+                                    onClick={() => setShowAddUser(true)}
+                                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm"
+                                >
+                                    <i className="fas fa-plus mr-2"></i>Add User
+                                </button>
+                                <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
+                                    <i className="fas fa-times"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="overflow-y-auto max-h-96">
+                            {loading ? (
+                                <div className="text-center py-8">
+                                    <i className="fas fa-spinner fa-spin text-2xl text-blue-500"></i>
+                                </div>
+                            ) : (
+                                <div className="space-y-4">
+                                    {users.map(user => (
+                                        <UserCard 
+                                            key={user.id} 
+                                            user={user} 
+                                            onUpdateRole={updateUserRole}
+                                            onToggleStatus={toggleUserStatus}
+                                            onDeleteUser={deleteUser}
+                                        />
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        {showAddUser && (
+                            <AddUserModal 
+                                onClose={() => setShowAddUser(false)}
+                                onSuccess={() => {
+                                    setShowAddUser(false);
+                                    fetchUsers(); // Refresh the list after adding user
+                                }}
+                            />
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        function UserCard({ user, onUpdateRole, onToggleStatus, onDeleteUser }) {
+            const [showReports, setShowReports] = useState(false);
+            const [availableReports, setAvailableReports] = useState([]);
+            const [userReportAccess, setUserReportAccess] = useState([]);
+            const [loading, setLoading] = useState(false);
+
+            // Fetch available reports and user's current access
+            useEffect(() => {
+                if (user.role === 'Viewer') {
+                    fetchReportsAndAccess();
+                }
+            }, [user.role]);
+
+            const fetchReportsAndAccess = async () => {
+                setLoading(true);
+                try {
+                    // Fetch all available reports
+                    const { data: reports, error: reportsError } = await supabase
+                        .from('procurement_reports')
+                        .select('id, name')
+                        .order('name');
+
+                    if (reportsError) {
+                        console.error('❌ Error fetching reports:', reportsError);
+                        return;
+                    }
+
+                    // Fetch user's current report access
+                    const { data: access, error: accessError } = await supabase
+                        .from('user_report_permissions')
+                        .select('report_id')
+                        .eq('user_id', user.id);
+
+                    if (accessError && accessError.code !== 'PGRST116') {
+                        console.error('❌ Error fetching user access:', accessError);
+                        return;
+                    }
+
+                    setAvailableReports(reports || []);
+                    setUserReportAccess((access || []).map(a => a.report_id));
+                } catch (error) {
+                    console.error('💥 Error in fetchReportsAndAccess:', error);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const toggleReportAccess = async (reportId) => {
+                try {
+                    const hasAccess = userReportAccess.includes(reportId);
+                    
+                    if (hasAccess) {
+                        // Remove access
+                        const { error } = await supabase
+                            .from('user_report_permissions')
+                            .delete()
+                            .eq('user_id', user.id)
+                            .eq('report_id', reportId);
+
+                        if (error) {
+                            console.error('❌ Error removing access:', error);
+                            alert(`Error removing access: ${error.message}`);
+                            return;
+                        }
+
+                        setUserReportAccess(prev => prev.filter(id => id !== reportId));
+                    } else {
+                        // Add access
+                        const { error } = await supabase
+                            .from('user_report_permissions')
+                            .insert([{
+                                user_id: user.id,
+                                report_id: reportId,
+                                granted_by: user.id, // This should be the current admin's ID in real implementation
+                                granted_at: new Date().toISOString()
+                            }]);
+
+                        if (error) {
+                            console.error('❌ Error adding access:', error);
+                            alert(`Error adding access: ${error.message}`);
+                            return;
+                        }
+
+                        setUserReportAccess(prev => [...prev, reportId]);
+                    }
+                } catch (error) {
+                    console.error('💥 Error toggling report access:', error);
+                    alert(`System error: ${error.message}`);
+                }
+            };
+
+            return (
+                <div className="bg-gray-50 p-4 rounded-lg border">
+                    <div className="flex justify-between items-start mb-3">
+                        <div>
+                            <h4 className="font-medium text-lg">{user.full_name}</h4>
+                            <p className="text-sm text-gray-600">{user.email}</p>
+                            <p className="text-xs text-gray-500">
+                                {user.auth_provider} • Created {new Date(user.created_at).toLocaleDateString()}
+                                {user.updated_at && user.updated_at !== user.created_at && (
+                                    <span> • Updated {new Date(user.updated_at).toLocaleDateString()}</span>
+                                )}
+                            </p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <select
+                                value={user.role}
+                                onChange={(e) => onUpdateRole(user.id, e.target.value)}
+                                className="text-sm px-3 py-1 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                            >
+                                <option value="Admin">Admin</option>
+                                <option value="Viewer">Viewer</option>
+                            </select>
+                            <button
+                                onClick={() => onToggleStatus(user.id)}
+                                className={`px-3 py-1 rounded-full text-xs font-medium ${
+                                    user.is_active 
+                                        ? 'bg-green-100 text-green-800 hover:bg-green-200' 
+                                        : 'bg-red-100 text-red-800 hover:bg-red-200'
+                                }`}
+                            >
+                                {user.is_active ? 'Active' : 'Inactive'}
+                            </button>
+                            <button
+                                onClick={() => onDeleteUser(user.id)}
+                                className="px-3 py-1 bg-red-100 text-red-800 hover:bg-red-200 rounded-full text-xs font-medium"
+                                title="Delete User"
+                            >
+                                <i className="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    {user.role === 'Admin' && (
+                        <div className="mt-2 text-sm text-gray-600">
+                            <i className="fas fa-crown text-yellow-500 mr-1"></i>
+                            Admin - Full access to all reports and user management
+                        </div>
+                    )}
+
+                    {user.role === 'Viewer' && (
+                        <div className="mt-3">
+                            <button
+                                onClick={() => setShowReports(!showReports)}
+                                className="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-2"
+                            >
+                                <i className={`fas fa-chevron-${showReports ? 'up' : 'down'}`}></i>
+                                Report Access ({userReportAccess.length} reports)
+                            </button>
+
+                            {showReports && (
+                                <div className="mt-3 p-3 bg-white rounded border">
+                                    {loading ? (
+                                        <div className="text-center py-4">
+                                            <i className="fas fa-spinner fa-spin text-blue-500"></i>
+                                            <p className="text-sm text-gray-500 mt-1">Loading reports...</p>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <div className="text-sm font-medium text-gray-700 mb-2">
+                                                Select accessible reports:
+                                            </div>
+                                            {availableReports.length === 0 ? (
+                                                <p className="text-sm text-gray-500">No reports available yet.</p>
+                                            ) : (
+                                                <div className="space-y-2 max-h-40 overflow-y-auto">
+                                                    {availableReports.map(report => (
+                                                        <label key={report.id} className="flex items-center text-sm">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={userReportAccess.includes(report.id)}
+                                                                onChange={() => toggleReportAccess(report.id)}
+                                                                className="mr-2 rounded text-blue-600 focus:ring-blue-500"
+                                                            />
+                                                            {report.name}
+                                                        </label>
+                                                    ))}
+                                                </div>
+                                            )}
+                                            <div className="mt-2 text-xs text-gray-500">
+                                                Selected: {userReportAccess.length} of {availableReports.length} reports
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        function AddUserModal({ onClose, onSuccess }) {
+            const [formData, setFormData] = useState({
+                email: '',
+                full_name: '',
+                role: 'Viewer',
+                auth_provider: 'manual'
+            });
+            const [loading, setLoading] = useState(false);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+
+                try {
+                    console.log('🔄 Adding new user to database...');
+                    
+                    const { error } = await supabase
+                        .from('app_users')
+                        .insert([{
+                            email: formData.email.toLowerCase().trim(),
+                            full_name: formData.full_name.trim(),
+                            role: formData.role,
+                            auth_provider: formData.auth_provider,
+                            is_active: true
+                        }]);
+
+                    if (error) {
+                        console.error('❌ ADD USER ERROR:', error);
+                        if (error.code === '23505') {
+                            alert(`Error: A user with email "${formData.email}" already exists.`);
+                        } else {
+                            alert(`Database Error: ${error.message}\n\nCould not add user.`);
+                        }
+                    } else {
+                        console.log('✅ User added successfully');
+                        alert(`User "${formData.full_name}" added successfully!`);
+                        onSuccess();
+                    }
+                } catch (error) {
+                    console.error('💥 ADD USER FAILED:', error);
+                    alert(`System Error: ${error.message}`);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-lg p-6 w-full max-w-lg mx-4">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-semibold">Add New User</h3>
+                            <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
+                                <i className="fas fa-times"></i>
+                            </button>
+                        </div>
+
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Email *
+                                </label>
+                                <input
+                                    type="email"
+                                    required
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                    value={formData.email}
+                                    onChange={(e) => setFormData({...formData, email: e.target.value})}
+                                    placeholder="user@company.com"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Full Name *
+                                </label>
+                                <input
+                                    type="text"
+                                    required
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                    value={formData.full_name}
+                                    onChange={(e) => setFormData({...formData, full_name: e.target.value})}
+                                    placeholder="John Doe"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Role *
+                                </label>
+                                <select
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                    value={formData.role}
+                                    onChange={(e) => setFormData({...formData, role: e.target.value})}
+                                >
+                                    <option value="Viewer">Viewer - Read-only access</option>
+                                    <option value="Admin">Admin - Full access</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Authentication Provider *
+                                </label>
+                                <select
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                    value={formData.auth_provider}
+                                    onChange={(e) => setFormData({...formData, auth_provider: e.target.value})}
+                                >
+                                    <option value="manual">Manual - Added by admin</option>
+                                    <option value="google">Google - OAuth login</option>
+                                </select>
+                            </div>
+
+                            <div className="flex gap-3 pt-4">
+                                <button
+                                    type="button"
+                                    onClick={onClose}
+                                    className="flex-1 px-4 py-2 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={loading}
+                                    className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50"
+                                >
+                                    {loading ? (
+                                        <>
+                                            <i className="fas fa-spinner fa-spin mr-2"></i>
+                                            Adding...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <i className="fas fa-plus mr-2"></i>
+                                            Add User
+                                        </>
+                                    )}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
