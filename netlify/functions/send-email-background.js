@@ -1,52 +1,95 @@
-const sendEmailNotification = async (action, data) => {
-    console.log(`🎯 EMAIL SYSTEM TRIGGERED - Action: ${action}`, data);
-    
-    try {
-        let emailTargets = [];
-        
-        switch (action) {
-            case 'new_version_viewers_only':
-                emailTargets = await getViewersForReportWorking(data.reportId, data.reportName);
-                break;
-            case 'version_updated':
-                emailTargets = await getViewersForVersionUpdate(data.reportId, data.reportName, data.versionId);
-                break;
-            case 'new_report':
-                emailTargets = await getAdminsForNewReportWorking(data.reportId, data.reportName);
-                break;
-            default:
-                throw new Error(`Unknown email action: ${action}`);
-        }
+// netlify/functions/send-email-background.js - Gmail SMTP Version (Background Function)
+// NOTE: Background functions return an immediate empty 202 response to the caller.
+// There is no synchronous result — check Netlify function logs to confirm delivery.
+const nodemailer = require('nodemailer');
 
-        if (emailTargets.length === 0) {
-            console.warn('⚠️ NO EMAIL TARGETS FOUND - No emails will be sent');
-            return { success: true, result: { emailsQueued: 0, message: 'No recipients found' } };
-        }
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-        console.log('🚀 Sending emails via Netlify Background Function...');
-        
-        const apiResponse = await fetch('https://repodirectory.netlify.app/.netlify/functions/send-email-background', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ emails: emailTargets })
-        });
-        
-        // Background functions reply with an empty 202 the instant they're accepted —
-        // the actual sending happens after this returns, so there's no count to read here.
-        if (apiResponse.status === 202) {
-            console.log(`✅ Email job accepted - ${emailTargets.length} emails queued`);
-            alert(`✅ Sending ${emailTargets.length} notification(s) in the background. Check Netlify function logs in a minute to confirm delivery.`);
-            return { success: true, result: { emailsQueued: emailTargets.length } };
-        } else {
-            const text = await apiResponse.text();
-            console.error('❌ Unexpected response from email function:', apiResponse.status, text);
-            alert(`❌ Email sending failed to start (status ${apiResponse.status}).`);
-            return { success: false, error: text };
-        }
-        
-    } catch (emailErr) {
-        console.error('💥 COMPLETE EMAIL FAILURE:', emailErr);
-        alert(`💥 Email Error: ${emailErr.message}`);
-        return { success: false, error: emailErr };
+exports.handler = async (event, context) => {
+  console.log('🟢 [BACKGROUND] send-email-background INVOKED at', new Date().toISOString());
+
+  if (event.httpMethod !== 'POST') {
+    console.log('🛑 [BACKGROUND] Rejected non-POST method:', event.httpMethod);
+    return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
+  }
+
+  try {
+    const { emails } = JSON.parse(event.body);
+    console.log(`🟢 [BACKGROUND] Parsed payload — ${emails?.length ?? 0} email(s) requested`);
+
+    if (!emails || !Array.isArray(emails)) {
+      console.error('❌ Invalid email data received');
+      return; // background functions ignore the return value anyway
     }
+
+    const GMAIL_USER = process.env.GMAIL_USER;
+    const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD;
+
+    console.log(`🔑 [BACKGROUND] GMAIL_USER present: ${!!GMAIL_USER}, GMAIL_APP_PASSWORD present: ${!!GMAIL_APP_PASSWORD}`);
+
+    if (!GMAIL_USER || !GMAIL_APP_PASSWORD) {
+      console.error('❌ Gmail credentials not found in environment variables');
+      return;
+    }
+
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      pool: true,
+      maxConnections: 1,    // keep sequential — this is what avoids Gmail throttling
+      maxMessages: 100,
+      auth: {
+        user: GMAIL_USER,
+        pass: GMAIL_APP_PASSWORD
+      }
+    });
+
+    console.log(`📧 [BACKGROUND] Processing ${emails.length} emails via Gmail SMTP (sequential)...`);
+
+    const results = [];
+
+    for (let index = 0; index < emails.length; index++) {
+      const emailData = emails[index];
+
+      try {
+        console.log(`📤 Sending email ${index + 1}/${emails.length} to: ${emailData.to}`);
+
+        const info = await transporter.sendMail({
+          from: `"Procurement Reports" <${GMAIL_USER}>`,
+          to: emailData.to,
+          subject: emailData.subject,
+          html: emailData.html
+        });
+
+        console.log(`✅ Email ${index + 1} sent successfully to ${emailData.to} — MessageId: ${info.messageId}`);
+        results.push({ success: true, email: emailData.to, messageId: info.messageId });
+
+      } catch (emailError) {
+        console.error(`💥 Email ${index + 1} failed for ${emailData.to}:`, emailError.message);
+        results.push({ success: false, email: emailData.to, error: emailError.message });
+      }
+
+      if (index < emails.length - 1) {
+        await delay(300);
+      }
+    }
+
+    transporter.close();
+
+    const successCount = results.filter(r => r.success).length;
+    const failureCount = results.filter(r => !r.success).length;
+
+    console.log(`🎉 [BACKGROUND] GMAIL SUMMARY: ${successCount} successful, ${failureCount} failed`);
+    if (failureCount > 0) {
+      results.filter(r => !r.success).forEach(r => console.log(`   - ${r.email}: ${r.error}`));
+    }
+
+    // Return value is ignored by Netlify for background functions, but harmless to include
+    return {
+      statusCode: 200,
+      body: JSON.stringify({ success: true, emailsSent: successCount, totalEmails: emails.length, results })
+    };
+
+  } catch (error) {
+    console.error('💥 [BACKGROUND] GMAIL FUNCTION ERROR:', error);
+  }
 };
